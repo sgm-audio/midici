@@ -198,7 +198,13 @@ advisories ok, bans ok, licenses ok, sources ok
 ### git log --oneline (after initial commits)
 
 ```text
-<!-- filled after commit -->
+51e6850 ci: add workspace fmt/clippy/test/doc/deny gates
+a981dd5 chore: scaffold Cargo workspace for midici crates
+e1a29a7 docs: add AGENTS.md, ARD-001, and phase ledgers
+afdd7d8 Merge pull request #1 from sgm-audio/cursor/midi-spec-pdfs-d03b
+9e9daa0 Use current MIDI-CI v1.2.1 from midi.org
+3a2853b Add MIDI Association core spec PDFs under docs/specs
+c1c0e5d Initial commit
 ```
 
 ### Open items
