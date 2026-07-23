@@ -198,6 +198,7 @@ advisories ok, bans ok, licenses ok, sources ok
 ### git log --oneline (after initial commits)
 
 ```text
+5fc3793 docs: record phase-0 DoD command outputs
 51e6850 ci: add workspace fmt/clippy/test/doc/deny gates
 a981dd5 chore: scaffold Cargo workspace for midici crates
 e1a29a7 docs: add AGENTS.md, ARD-001, and phase ledgers
