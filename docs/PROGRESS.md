@@ -198,6 +198,7 @@ advisories ok, bans ok, licenses ok, sources ok
 ### git log --oneline (after initial commits)
 
 ```text
+981ce49 docs: refresh phase-0 git log in PROGRESS.md
 5fc3793 docs: record phase-0 DoD command outputs
 51e6850 ci: add workspace fmt/clippy/test/doc/deny gates
 a981dd5 chore: scaffold Cargo workspace for midici crates
@@ -207,6 +208,11 @@ afdd7d8 Merge pull request #1 from sgm-audio/cursor/midi-spec-pdfs-d03b
 3a2853b Add MIDI Association core spec PDFs under docs/specs
 c1c0e5d Initial commit
 ```
+
+### CI status
+
+- PR https://github.com/sgm-audio/midici/pull/4 — all workflow jobs green (fmt, clippy, test, doc, cargo-deny) on 2026-07-23.
+- Tag: `phase-0-complete` on this phase tip.
 
 ### Open items
 - Restore true `distrobox enter midici-dev` on developer hosts (Bazzite) where socket integration works.
