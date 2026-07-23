@@ -1,0 +1,16 @@
+[package]
+name = "virtual-responder"
+description = "Standalone daemon on a virtual ALSA UMP endpoint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+midici-responder = { path = "../../crates/midici-responder" }
+
+[lints]
+workspace = true

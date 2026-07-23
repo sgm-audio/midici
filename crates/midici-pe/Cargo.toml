@@ -1,0 +1,12 @@
+[package]
+name = "midici-pe"
+description = "MIDI-CI Property Exchange resource model, chunker, Mcoded7, JSON codecs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
