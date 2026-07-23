@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/midici-core",
+    "crates/midici-pe",
+    "crates/midici-responder",
+    "crates/midici-transport-alsa",
+    "crates/midici-transport-clap",
+    "crates/midici-conformance",
+    "examples/virtual-responder",
+    "examples/clap-autoprop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/sgm-audio/midici"
+authors = ["SGM Studios"]
+rust-version = "1.97.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
