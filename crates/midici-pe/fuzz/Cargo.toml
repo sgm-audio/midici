@@ -1,0 +1,30 @@
+[package]
+name = "midici-pe-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+midici-pe = { path = ".." }
+midici-core = { path = "../../midici-core" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_mcoded7"
+path = "fuzz_targets/fuzz_mcoded7.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_reassemble"
+path = "fuzz_targets/fuzz_reassemble.rs"
+test = false
+doc = false
+bench = false

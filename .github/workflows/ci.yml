@@ -67,3 +67,23 @@ jobs:
         with:
           command: check
           rust-version: "1.97.1"
+
+  fuzz-smoke:
+    name: fuzz-smoke (60s/target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            crates/midici-pe/fuzz -> crates/midici-pe/fuzz/target
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --locked
+      - name: Smoke fuzz_mcoded7 (60s)
+        run: cargo +nightly fuzz run fuzz_mcoded7 --fuzz-dir crates/midici-pe/fuzz -- -max_total_time=60
+      - name: Smoke fuzz_reassemble (60s)
+        run: cargo +nightly fuzz run fuzz_reassemble --fuzz-dir crates/midici-pe/fuzz -- -max_total_time=60
