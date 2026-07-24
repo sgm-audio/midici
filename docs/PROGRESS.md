@@ -698,3 +698,20 @@ aseqdump -u 2 -p <client:port>
 ### Tag note
 - Branch: `cursor/phase-5-alsa-transport-d03b`
 - Tag `phase-5-complete` after this commit (unit/build DoD met; G5 human paste pending).
+
+---
+
+## Phase 6 — HUMAN GATE G6 (clap-sys vs clack) — 2026-07-24
+
+**STOP — awaiting Scott's call before any Phase 6 build.**
+
+### Decision comparison (≤15 lines)
+
+1. **`clap-sys` 0.5** — raw `*-sys` FFI to the CLAP C headers (params, timer-support, note/MIDI events, `clap_process`). Full surface; we own every `unsafe` call and RT discipline.
+2. **`clack` (`clack-plugin` 0.1 + `clack-extensions` 0.1)** — safe wrappers **on top of `clap-sys`**. Splits `MainThread` vs `AudioProcessor` (matches ARD §6 control vs RT). Feature-gates `params`, `timer`, `note-ports`.
+3. **Binding maturity:** `clap-sys` is the established thin binding (MSRV 1.64). `clack` is early (`0.1.0`, MSRV 1.85; our toolchain 1.97 OK) but actively structured for CLAP's threading model.
+4. **RT guarantees:** Neither crate can *prove* zero-alloc in `process()`; **we** still wrap the RT path with `assert_no_alloc` + `rtrb` and keep JSON off the audio thread (ARD §6 / AGENTS §9). `clack` advertises minimal overhead; `clap-sys` has zero wrapper risk beyond our FFI.
+5. **Param / host-timer / MIDI surface:** Both expose the needed CLAP pieces — `clap-sys` via raw structs; `clack-extensions` via typed `params` + `timer` (+ note events for SysEx/MIDI out).
+6. **Fit for this adapter:** RT work is only ring push/pop + emit MIDI events; control owns `clap.timer-support` 10 ms + `ChCtrlList` from params. Either stack works; **lean `clack`** if we want the Main/RT split and typed extensions for free, **lean `clap-sys`** if we want the thinnest FFI and total ownership of unsafe.
+
+**Scott: pick `clap-sys` | `clack` | hybrid (clack for plugin shell, raw for RT event copy).** No Phase 6 code until that call is recorded here.
