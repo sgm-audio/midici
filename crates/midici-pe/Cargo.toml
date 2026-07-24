@@ -8,5 +8,18 @@ repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+# zlib+Mcoded7 mutualEncoding — M2-103 §6.1.6 / ARD §2
+zlib = ["dep:miniz_oxide"]
+
+[dependencies]
+midici-core = { path = "../midici-core" }
+miniz_oxide = { version = "0.8", optional = true, default-features = false, features = ["with-alloc"] }
+
+[dev-dependencies]
+proptest = "1.6"
+rand = "0.8"
+
 [lints]
 workspace = true
