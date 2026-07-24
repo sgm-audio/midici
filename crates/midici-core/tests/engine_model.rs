@@ -338,8 +338,7 @@ fn sub_min_sysex_discovery_is_malformed() {
     let mut eng = engine(0x4444);
     let peer = Muid::ordinary(0x0102_0304).unwrap();
     // Encode a valid Discovery then patch max SysEx below §5.5.3 floor.
-    let mut inbound =
-        discovery_from(peer, Muid::BROADCAST, MESSAGE_FORMAT_VERSION_1_2, 128, 0);
+    let mut inbound = discovery_from(peer, Muid::BROADCAST, MESSAGE_FORMAT_VERSION_1_2, 128, 0);
     // max_sysex_size is bytes 12..16 of the payload after CI header.
     inbound[CI_HEADER_LEN + 12] = 64; // LSB of size 64
     inbound[CI_HEADER_LEN + 13] = 0;
