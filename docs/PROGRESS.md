@@ -607,5 +607,7 @@ fuzz_reassemble: Done 100000 runs in 5 second(s)
 - Phase 5 (not started): do not start in this session.
 
 ### CI / tag note
-- Branch: `cursor/phase-4-pe-get-d03b` @ `40d1e6e`
-- Tag `phase-4-complete` → `40d1e6e`
+- Branch: `cursor/phase-4-pe-get-d03b` @ `3f7349b`
+- Tag `phase-4-complete` → `3f7349b`
+- PR: ManagePullRequest/gh createPullRequest unavailable in this environment
+  (open from https://github.com/sgm-audio/midici/pull/new/cursor/phase-4-pe-get-d03b)
