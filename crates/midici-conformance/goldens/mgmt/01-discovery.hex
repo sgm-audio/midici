@@ -1,0 +1,17 @@
+# CONSTRUCTED vector — needs human check (see docs/VERIFY.md)
+# M2-101-UM v1.2.1 §5.5 Table 6 (PDF p.27) — Discovery, Message Format Version 0x02
+# Body is F0/F7 stripped (ARD §3 / M2-101 §5.2)
+7E # Universal Non-Realtime SysEx — M2-101 §5.2.1 Table 5
+7F # Device ID Function Block — M2-101 §5.5 Table 6
+0D # Sub-ID#1 MIDI-CI — M2-101 §5.2.1 Table 5
+70 # Sub-ID#2 Discovery — M2-101 §5.5 Table 6 / Appendix E
+02 # Message Format Version 1.2 — M2-101 §5.2.1
+04 06 08 08 # Source MUID 0x01020304 as 4×7-bit LE — M2-101 §5.2.1 / §3.3
+7F 7F 7F 7F # Destination Broadcast MUID 0x0FFFFFFF — M2-101 §3.3.3 / §5.5 Table 6
+7D 00 00 # Manufacturer SysEx ID (1-byte ID 0x7D padded) — M2-101 §5.5.1
+01 00 # Device Family 1 (LSB first 7-bit) — M2-101 §5.5.1 / §5.5 Table 6
+02 00 # Device Family Model Number 2 — M2-101 §5.5.1 / §5.5 Table 6
+01 00 00 00 # Software Revision Level — M2-101 §5.5.1
+08 # Category Supported: PE (D3) — M2-101 §5.5.2 Table 7
+00 04 00 00 # Receivable Maximum SysEx Size 512 — M2-101 §5.5.3
+00 # Initiator Output Path ID — M2-101 §5.5.4 / Table 6 (v2 field)

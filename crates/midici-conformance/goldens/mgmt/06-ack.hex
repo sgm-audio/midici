@@ -1,0 +1,14 @@
+# CONSTRUCTED vector — needs human check (see docs/VERIFY.md)
+# M2-101-UM v1.2.1 §5.10 Table 13–14 (PDF p.33–34) — MIDI-CI ACK
+7E # Universal Non-Realtime SysEx — M2-101 §5.2.1 Table 5
+7F # Device ID Function Block — M2-101 §5.10 Table 13
+0D # Sub-ID#1 MIDI-CI — M2-101 §5.2.1 Table 5
+7D # Sub-ID#2 MIDI-CI ACK — M2-101 §5.10 Table 13 / Appendix E
+02 # Message Format Version 1.2 — M2-101 §5.2.1
+08 0E 18 28 # Source MUID 0x05060708 — M2-101 §5.2.1 / §3.3
+04 06 08 08 # Destination MUID 0x01020304 — M2-101 §5.10 Table 13
+34 # Original Transaction Sub-ID#2 Classification (example Get Property) — M2-101 §5.10.1
+00 # ACK Status Code ACK — M2-101 §5.10.2 Table 14
+00 # ACK Status Data — M2-101 §5.10.2 Table 14
+00 00 00 00 00 # ACK details (reserved/zero for this constructed case) — M2-101 §5.10.3
+00 00 # Message Length 0 — M2-101 §5.10.4
