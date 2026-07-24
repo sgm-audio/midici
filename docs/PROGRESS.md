@@ -539,3 +539,69 @@ test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 ### CI note
 - PR #7 CI green (fmt/clippy/test/doc/deny/fuzz-smoke): https://github.com/sgm-audio/midici/pull/7
 - Tag `phase-3-complete` → `f4b6b3d`
+
+---
+
+## Phase 4 — PE Capabilities + Get / resources / status matrix — 2026-07-24
+
+### Done
+- BUILD (`midici-core`): PE Caps Inquiry/Reply codecs (`pe_caps`); PE Get
+  Inquiry/Reply wrappers (`pe_get`); sub-IDs `0x30/0x31/0x34/0x35` + PE version
+  constants citing M2-101 §8.5–§8.8.
+- BUILD (`midici-pe`): typed `PeStatus` (200/341/400/403/404/405/413/445) citing
+  M2-103 §7.4.1 Table 15; JSON header parse/encode with depth/size limits;
+  `PropertyResource` + `DeviceInfo` / `ResourceList`; `ResourceRegistry`;
+  `PeController` (Caps negotiate `numSimultaneousRequests` + PE version;
+  Get correlation via Phase-2 reassembler/chunker; Busy before accept);
+  `ResponderEngine` façade over `CiEngine` + PE.
+- TESTS (`midici-conformance`): test-only initiator shim; loopback Discovery →
+  PE Caps → Get ResourceList → Get DeviceInfo at max SysEx 128 and 4096
+  (payload equality + chunk-count); NAK matrix for 400/403/404/405/413/445/341;
+  golden `exchanges/04-pe-get-deviceinfo.transcript` with `ENGINE responder`
+  replay path.
+- TAG: `phase-4-complete`.
+
+### Deviations from ARD (with reason)
+1. **Busy status 445 vs M2-103 343**: ARD §7 / Phase-4 DoD map excess concurrent
+   txs → **445**. M2-103 §7.4.1 Table 15 lists **343** “Too Many Requests” and
+   **445** “Invalid Version of Data”. Implementation follows ARD/DoD; documented
+   on `PeStatus::Busy`.
+2. **PE major/minor = 0x00/0x00**: M2-101 §8.5 Table 31 only enumerates Common
+   Rules 1.0/1.1 → `0x00`/`0x00` (no newer PE version row in pinned PDFs).
+3. **Deps**: `serde` + `serde_json` (alloc) on `midici-pe` for PE JSON headers /
+   resources on the control path only (ARD §2). `rand_core` on `midici-pe` for
+   `ResponderEngine` RNG bound shared with `CiEngine`. `midici-conformance`
+   gains path deps on `midici-pe`, `serde_json`, `rand_core` for harness only.
+4. **DeviceInfo JSON shape**: manufacturer/family/model/version fields from
+   `CiConfig` identity as M2-103-style arrays (no serial — not in `CiConfig`).
+5. **Set / Subscribe**: out of Phase-4 scope (Get + Caps only).
+
+### DoD outputs (verbatim)
+
+#### `cargo test --workspace --all-features`
+```text
+midici-conformance: exchange_transcripts_byte_exact_replay ... ok (≥4 goldens)
+pe_loopback: 2 passed (128 + 4096)
+pe_nak_matrix: 8 passed
+midici-pe json_header: malformed_never_panics / depth / size ... ok
+test result lines: all ok (0 failed across workspace)
+```
+
+#### `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+```
+
+#### fuzz smokes (`-runs=100000`)
+```text
+fuzz_mcoded7: Done 100000 runs in 1 second(s)
+fuzz_reassemble: Done 100000 runs in 5 second(s)
+```
+
+### Open items
+- HUMAN GATE G1 still open (mgmt goldens review).
+- Set/Subscribe, Process Inquiry, transport wiring — later phases.
+- Consider aligning Busy with M2-103 343 if ARD is revised.
+
+### Next phase
+- Phase 5 (not started): do not start in this session.

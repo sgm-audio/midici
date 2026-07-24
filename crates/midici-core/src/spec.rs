@@ -135,3 +135,31 @@ pub const NAK_STATUS_BUSY: u8 = 0x43;
 
 /// Minimum receivable SysEx size for all MIDI-CI Devices. // M2-101 §5.5.3
 pub const MIN_RECEIVABLE_SYSEX_SIZE: u32 = 128;
+
+// --- Sub-ID#2: Property Exchange Messages (Category 3) — M2-101 Appendix E / Table 4 ---
+
+/// Sub-ID#2: Inquiry: Property Exchange Capabilities. // M2-101 Appendix E / §8.5 Table 30
+pub const SUB_ID2_PE_CAPS_INQUIRY: u8 = 0x30;
+
+/// Sub-ID#2: Reply to Property Exchange Capabilities. // M2-101 Appendix E / §8.6 Table 32
+pub const SUB_ID2_PE_CAPS_REPLY: u8 = 0x31;
+
+/// Sub-ID#2: Inquiry: Get Property Data. // M2-101 Appendix E / §8.7 Table 33
+pub const SUB_ID2_PE_GET_INQUIRY: u8 = 0x34;
+
+/// Sub-ID#2: Reply to Get Property Data. // M2-101 Appendix E / §8.8 Table 34
+pub const SUB_ID2_PE_GET_REPLY: u8 = 0x35;
+
+/// PE Major/Minor for Common Rules 1.0/1.1 (also used until M2-101 lists a newer row).
+/// // M2-101 §8.5 Table 31
+pub const PE_VERSION_MAJOR: u8 = 0x00;
+pub const PE_VERSION_MINOR: u8 = 0x00;
+
+/// Default simultaneous PE requests we advertise when unset. // ARD §6 (4-tx per peer)
+pub const PE_DEFAULT_SIMULTANEOUS_REQUESTS: u8 = 4;
+
+/// Returns true if `sub_id2` is in the Property Exchange category. // M2-101 Table 4
+#[inline]
+pub const fn is_pe_sub_id(sub_id2: u8) -> bool {
+    (sub_id2 & 0xF0) == 0x30
+}

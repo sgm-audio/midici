@@ -1,13 +1,24 @@
-//! Golden exchange transcript replay harness. // ARD §8 / Phase 3 DoD
+//! Golden exchange transcript replay harness. // ARD §8 / Phase 3–4 DoD
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use midici_core::{CapFlags, CiConfig, CiEngine, DeviceIdentity, Muid};
+use midici_pe::{ResourceRegistry, ResponderEngine};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
 use crate::parse_hex_golden;
+
+/// Which engine façade to construct for replay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TranscriptEngine {
+    /// Management-only [`CiEngine`] (Phase 3 goldens).
+    #[default]
+    Ci,
+    /// Management + PE [`ResponderEngine`] (Phase 4 PE Get goldens).
+    Responder,
+}
 
 /// One step in an exchange transcript.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,6 +37,7 @@ pub struct ExchangeTranscript {
     pub name: String,
     pub seed: u64,
     pub config: CiConfig,
+    pub engine: TranscriptEngine,
     pub steps: Vec<TranscriptStep>,
 }
 
@@ -34,6 +46,7 @@ pub struct ExchangeTranscript {
 /// Grammar (line-oriented):
 /// - `#` comments / blank lines ignored
 /// - `SEED <u64>`
+/// - `ENGINE ci|responder` (default `ci`; `responder` enables PE Caps/Get)
 /// - `MAX_SYSEX <u32>`
 /// - `CAPS <hex u8>`
 /// - `FB <hex u8>`
@@ -56,6 +69,7 @@ pub fn parse_transcript(name: &str, text: &str) -> Result<ExchangeTranscript, St
     let mut fb = 0x7Fu8;
     let mut path = 0u8;
     let mut default_group = 0u8;
+    let mut engine = TranscriptEngine::Ci;
     let mut steps = Vec::new();
 
     for (lineno, raw) in text.lines().enumerate() {
@@ -68,6 +82,21 @@ pub fn parse_transcript(name: &str, text: &str) -> Result<ExchangeTranscript, St
             .next()
             .ok_or_else(|| format!("line {}: empty", lineno + 1))?;
         match tag {
+            "ENGINE" => {
+                let s = parts
+                    .next()
+                    .ok_or_else(|| format!("line {}: ENGINE needs value", lineno + 1))?;
+                engine = match s {
+                    "ci" => TranscriptEngine::Ci,
+                    "responder" => TranscriptEngine::Responder,
+                    other => {
+                        return Err(format!(
+                            "line {}: ENGINE must be ci|responder, got '{other}'",
+                            lineno + 1
+                        ));
+                    }
+                };
+            }
             "SEED" => {
                 let s = parts
                     .next()
@@ -180,6 +209,7 @@ pub fn parse_transcript(name: &str, text: &str) -> Result<ExchangeTranscript, St
         name: name.to_string(),
         seed,
         config,
+        engine,
         steps,
     })
 }
@@ -199,6 +229,13 @@ fn parse_u8_hex(s: &str) -> Result<u8, String> {
 
 /// Replay a transcript: feed inbounds, assert byte-exact outbounds.
 pub fn replay(t: &ExchangeTranscript) -> Result<Muid, String> {
+    match t.engine {
+        TranscriptEngine::Ci => replay_ci(t),
+        TranscriptEngine::Responder => replay_responder(t),
+    }
+}
+
+fn replay_ci(t: &ExchangeTranscript) -> Result<Muid, String> {
     let mut eng = CiEngine::new(t.config.clone(), StdRng::seed_from_u64(t.seed));
     for (i, step) in t.steps.iter().enumerate() {
         match step {
@@ -210,21 +247,7 @@ pub fn replay(t: &ExchangeTranscript) -> Result<Muid, String> {
                 let out = eng
                     .next_outbound()
                     .ok_or_else(|| format!("step {i}: expected outbound, queue empty"))?;
-                if let Some(g) = group {
-                    if out.group != *g {
-                        return Err(format!(
-                            "step {i}: group mismatch: got {}, want {g}",
-                            out.group
-                        ));
-                    }
-                }
-                if out.body.as_slice() != body.as_slice() {
-                    return Err(format!(
-                        "step {i}: outbound mismatch\n  got:  {}\n  want: {}",
-                        hex_bytes(&out.body),
-                        hex_bytes(body)
-                    ));
-                }
+                check_outbound(i, group, body, &out)?;
             }
             TranscriptStep::Poll { now_ms } => eng.poll(*now_ms),
         }
@@ -236,6 +259,57 @@ pub fn replay(t: &ExchangeTranscript) -> Result<Muid, String> {
         ));
     }
     Ok(eng.muid())
+}
+
+fn replay_responder(t: &ExchangeTranscript) -> Result<Muid, String> {
+    let registry = ResourceRegistry::with_device_info(t.config.identity);
+    let mut eng = ResponderEngine::new(t.config.clone(), StdRng::seed_from_u64(t.seed), registry);
+    for (i, step) in t.steps.iter().enumerate() {
+        match step {
+            TranscriptStep::Inbound { group, body } => {
+                eng.feed_sysex(*group, body)
+                    .map_err(|e| format!("step {i}: feed {:?}", e))?;
+            }
+            TranscriptStep::ExpectOutbound { group, body } => {
+                let out = eng
+                    .next_outbound()
+                    .ok_or_else(|| format!("step {i}: expected outbound, queue empty"))?;
+                check_outbound(i, group, body, &out)?;
+            }
+            TranscriptStep::Poll { now_ms } => eng.poll(*now_ms),
+        }
+    }
+    if let Some(extra) = eng.next_outbound() {
+        return Err(format!(
+            "unexpected extra outbound: {}",
+            hex_bytes(&extra.body)
+        ));
+    }
+    Ok(eng.muid())
+}
+
+fn check_outbound(
+    i: usize,
+    group: &Option<u8>,
+    body: &[u8],
+    out: &midici_core::OutboundSysex,
+) -> Result<(), String> {
+    if let Some(g) = group {
+        if out.group != *g {
+            return Err(format!(
+                "step {i}: group mismatch: got {}, want {g}",
+                out.group
+            ));
+        }
+    }
+    if out.body.as_slice() != body {
+        return Err(format!(
+            "step {i}: outbound mismatch\n  got:  {}\n  want: {}",
+            hex_bytes(&out.body),
+            hex_bytes(body)
+        ));
+    }
+    Ok(())
 }
 
 fn hex_bytes(b: &[u8]) -> String {
