@@ -4,8 +4,8 @@
 
 use midici_core::spec::{
     CI_HEADER_LEN, MESSAGE_FORMAT_VERSION_1_1, MESSAGE_FORMAT_VERSION_1_2,
-    MESSAGE_FORMAT_VERSION_RESERVED_MASK, MIN_RECEIVABLE_SYSEX_SIZE, SUB_ID2_DISCOVERY,
-    SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK, SUB_ID2_REPLY_TO_DISCOVERY, UNIVERSAL_NON_REALTIME,
+    MESSAGE_FORMAT_VERSION_RESERVED_MASK, SUB_ID2_DISCOVERY, SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK,
+    SUB_ID2_REPLY_TO_DISCOVERY, UNIVERSAL_NON_REALTIME,
 };
 use midici_core::{
     mgmt_header, AckNakBody, CapFlags, CiConfig, CiEngine, CiEvent, DeviceIdentity, Discovery,
@@ -334,14 +334,20 @@ fn poll_accepts_monotonic_time() {
 }
 
 #[test]
-fn min_sysex_negotiation_clamps_floor() {
+fn sub_min_sysex_discovery_is_malformed() {
     let mut eng = engine(0x4444);
     let peer = Muid::ordinary(0x0102_0304).unwrap();
-    // Peer advertises below floor; negotiated still >= MIN after clamp then min().
-    eng.feed_sysex(
-        0,
-        &discovery_from(peer, Muid::BROADCAST, MESSAGE_FORMAT_VERSION_1_2, 64, 0),
-    )
-    .unwrap();
-    assert_eq!(eng.peers()[0].max_sysex, MIN_RECEIVABLE_SYSEX_SIZE.min(512));
+    // Encode a valid Discovery then patch max SysEx below §5.5.3 floor.
+    let mut inbound =
+        discovery_from(peer, Muid::BROADCAST, MESSAGE_FORMAT_VERSION_1_2, 128, 0);
+    // max_sysex_size is bytes 12..16 of the payload after CI header.
+    inbound[CI_HEADER_LEN + 12] = 64; // LSB of size 64
+    inbound[CI_HEADER_LEN + 13] = 0;
+    inbound[CI_HEADER_LEN + 14] = 0;
+    inbound[CI_HEADER_LEN + 15] = 0;
+    eng.feed_sysex(0, &inbound).unwrap();
+    assert!(eng.peers().is_empty());
+    let out = eng.next_outbound().expect("NAK for malformed Discovery");
+    let nak = Nak::decode(&out.body).unwrap();
+    assert_eq!(nak.body.status_code, NakCode::Malformed.to_u8());
 }
