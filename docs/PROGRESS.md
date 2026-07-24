@@ -617,3 +617,9 @@ fuzz_reassemble: Done 100000 runs in 5 second(s)
   fixed peer table was full; that variant is per-peer (5th concurrent tx → 445).
   Added `PeError::PeerTableFull`; Phase-4 controller maps it to status 341
   (`Unavailable`), not Busy/445. Test: `peer_table_full_is_not_too_many_concurrent`.
+
+### Bugbot follow-up (ACK v1.1 + min SysEx) — 2026-07-24
+- Fixed: `Ack` encode/decode now mirrors `Nak` for Message Format Version 1.1
+  (header-only; no v2 trailer).
+- Fixed: `Discovery` / `ReplyToDiscovery` reject `max_sysex_size < 128`
+  (`CiError::BadField`) on encode and decode per M2-101 §5.5.3.

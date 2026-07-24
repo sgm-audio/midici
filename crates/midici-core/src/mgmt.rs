@@ -5,8 +5,9 @@ use crate::header::CiHeader;
 use crate::muid::Muid;
 use crate::spec::{
     CI_HEADER_LEN, DEVICE_ID_FUNCTION_BLOCK, MESSAGE_FORMAT_VERSION_1_2,
-    PRODUCT_INSTANCE_ID_MAX_LEN, SUB_ID2_ACK, SUB_ID2_DISCOVERY, SUB_ID2_ENDPOINT_INQUIRY,
-    SUB_ID2_ENDPOINT_REPLY, SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK, SUB_ID2_REPLY_TO_DISCOVERY,
+    MIN_RECEIVABLE_SYSEX_SIZE, PRODUCT_INSTANCE_ID_MAX_LEN, SUB_ID2_ACK, SUB_ID2_DISCOVERY,
+    SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY, SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK,
+    SUB_ID2_REPLY_TO_DISCOVERY,
 };
 
 fn read_u16_le7(bytes: &[u8]) -> Result<u16, CiError> {
@@ -48,6 +49,14 @@ fn write_u32_le7(v: u32, out: &mut [u8]) -> Result<(), CiError> {
     out[1] = ((v >> 7) & 0x7F) as u8;
     out[2] = ((v >> 14) & 0x7F) as u8;
     out[3] = ((v >> 21) & 0x7F) as u8;
+    Ok(())
+}
+
+/// Receivable Maximum SysEx Message Size must be ≥128. // M2-101 §5.5.3
+fn require_min_sysex(size: u32) -> Result<(), CiError> {
+    if size < MIN_RECEIVABLE_SYSEX_SIZE {
+        return Err(CiError::BadField);
+    }
     Ok(())
 }
 
@@ -102,6 +111,7 @@ impl Discovery {
         let software_revision = [data[7], data[8], data[9], data[10]];
         let category_supported = data[11];
         let max_sysex_size = read_u32_le7(&data[12..16])?;
+        require_min_sysex(max_sysex_size)?;
         let output_path_id = if header.version >= MESSAGE_FORMAT_VERSION_1_2 {
             data[16]
         } else {
@@ -126,6 +136,7 @@ impl Discovery {
         if out.len() < total {
             return Err(CiError::BufferTooSmall);
         }
+        require_min_sysex(self.max_sysex_size)?;
         let mut h = self.header;
         h.sub_id2 = SUB_ID2_DISCOVERY;
         h.encode(out)?;
@@ -176,6 +187,8 @@ impl ReplyToDiscovery {
             return Err(CiError::BadLength);
         }
         require_7bit_bytes(&data[..need])?;
+        let max_sysex_size = read_u32_le7(&data[12..16])?;
+        require_min_sysex(max_sysex_size)?;
         Ok(Self {
             header,
             manufacturer: [data[0], data[1], data[2]],
@@ -183,7 +196,7 @@ impl ReplyToDiscovery {
             model: read_u16_le7(&data[5..7])?,
             software_revision: [data[7], data[8], data[9], data[10]],
             category_supported: data[11],
-            max_sysex_size: read_u32_le7(&data[12..16])?,
+            max_sysex_size,
             output_path_id: if header.version >= MESSAGE_FORMAT_VERSION_1_2 {
                 data[16]
             } else {
@@ -203,6 +216,7 @@ impl ReplyToDiscovery {
         if out.len() < total {
             return Err(CiError::BufferTooSmall);
         }
+        require_min_sysex(self.max_sysex_size)?;
         let mut h = self.header;
         h.sub_id2 = SUB_ID2_REPLY_TO_DISCOVERY;
         h.encode(out)?;
@@ -423,7 +437,23 @@ impl<'a> Ack<'a> {
         if header.sub_id2 != SUB_ID2_ACK {
             return Err(CiError::UnsupportedSubId2(header.sub_id2));
         }
-        // ACK Status fields exist in this document's table for current format. // M2-101 §5.10
+        // Status / body fields were added in Message Format Version 2.
+        // v1.1 ACK is header-only (same as v1.1 NAK). // M2-101 §5.10 / §5.11
+        if header.version < MESSAGE_FORMAT_VERSION_1_2 {
+            if !data.is_empty() {
+                return Err(CiError::BadLength);
+            }
+            return Ok(Self {
+                header,
+                body: AckNakBody {
+                    original_sub_id2: 0,
+                    status_code: 0,
+                    status_data: 0,
+                    details: [0; 5],
+                    message: &[],
+                },
+            });
+        }
         Ok(Self {
             header,
             body: decode_ack_nak_body(data)?,
@@ -437,6 +467,9 @@ impl<'a> Ack<'a> {
         let mut h = self.header;
         h.sub_id2 = SUB_ID2_ACK;
         h.encode(out)?;
+        if h.version < MESSAGE_FORMAT_VERSION_1_2 {
+            return Ok(CI_HEADER_LEN);
+        }
         let n = encode_ack_nak_body(&self.body, &mut out[CI_HEADER_LEN..])?;
         Ok(CI_HEADER_LEN + n)
     }
@@ -580,6 +613,76 @@ mod tests {
         let n = msg.encode(&mut buf).unwrap();
         let decoded = Discovery::decode(&buf[..n]).unwrap();
         assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn discovery_rejects_sub_min_sysex() {
+        let mut msg = sample_discovery();
+        msg.max_sysex_size = MIN_RECEIVABLE_SYSEX_SIZE - 1;
+        let mut buf = [0u8; 64];
+        assert_eq!(msg.encode(&mut buf), Err(CiError::BadField));
+
+        // On-wire Discovery with size 64 must fail decode. // M2-101 §5.5.3
+        let mut ok = sample_discovery();
+        ok.max_sysex_size = MIN_RECEIVABLE_SYSEX_SIZE;
+        let n = ok.encode(&mut buf).unwrap();
+        write_u32_le7(64, &mut buf[CI_HEADER_LEN + 12..CI_HEADER_LEN + 16]).unwrap();
+        assert_eq!(Discovery::decode(&buf[..n]), Err(CiError::BadField));
+    }
+
+    #[test]
+    fn reply_to_discovery_rejects_sub_min_sysex() {
+        let mut reply = ReplyToDiscovery {
+            header: mgmt_header(
+                SUB_ID2_REPLY_TO_DISCOVERY,
+                Muid::ordinary(0x0A0B_0C0D).unwrap(),
+                Muid::ordinary(0x0102_0304).unwrap(),
+            ),
+            manufacturer: [0x43, 0, 0],
+            family: 1,
+            model: 2,
+            software_revision: [1, 0, 0, 0],
+            category_supported: CAP_PROPERTY_EXCHANGE,
+            max_sysex_size: MIN_RECEIVABLE_SYSEX_SIZE,
+            output_path_id: 0,
+            function_block: 0x7F,
+        };
+        let mut buf = [0u8; 64];
+        let n = reply.encode(&mut buf).unwrap();
+        write_u32_le7(1, &mut buf[CI_HEADER_LEN + 12..CI_HEADER_LEN + 16]).unwrap();
+        assert_eq!(ReplyToDiscovery::decode(&buf[..n]), Err(CiError::BadField));
+
+        reply.max_sysex_size = 0;
+        assert_eq!(reply.encode(&mut buf), Err(CiError::BadField));
+    }
+
+    #[test]
+    fn ack_v1_1_is_header_only() {
+        let msg = Ack {
+            header: CiHeader {
+                device_id: DEVICE_ID_FUNCTION_BLOCK,
+                sub_id2: SUB_ID2_ACK,
+                version: MESSAGE_FORMAT_VERSION_1_1,
+                source: Muid::ordinary(0x0102_0304).unwrap(),
+                dest: Muid::ordinary(0x0A0B_0C0D).unwrap(),
+            },
+            body: AckNakBody {
+                original_sub_id2: 0x70,
+                status_code: 0,
+                status_data: 0,
+                details: [1, 2, 3, 4, 5],
+                message: b"ignored",
+            },
+        };
+        let mut buf = [0u8; 64];
+        let n = msg.encode(&mut buf).unwrap();
+        assert_eq!(n, CI_HEADER_LEN);
+        let decoded = Ack::decode(&buf[..n]).unwrap();
+        assert_eq!(decoded.header.version, MESSAGE_FORMAT_VERSION_1_1);
+        assert_eq!(decoded.body.message, &[] as &[u8]);
+        // Trailing body on a v1.1 ACK is malformed.
+        buf[n] = 0x00;
+        assert_eq!(Ack::decode(&buf[..=n]), Err(CiError::BadLength));
     }
 
     #[test]
