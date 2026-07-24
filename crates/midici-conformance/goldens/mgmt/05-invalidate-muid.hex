@@ -1,0 +1,10 @@
+# CONSTRUCTED vector — needs human check (see docs/VERIFY.md)
+# M2-101-UM v1.2.1 §5.9 Table 12 (PDF p.32) — Invalidate MUID
+7E # Universal Non-Realtime SysEx — M2-101 §5.2.1 Table 5
+7F # Device ID to Function Block — M2-101 §5.9 Table 12
+0D # Sub-ID#1 MIDI-CI — M2-101 §5.2.1 Table 5
+7E # Sub-ID#2 Invalidate MUID — M2-101 §5.9 Table 12 / Appendix E
+02 # Message Format Version 1.2 — M2-101 §5.2.1
+04 06 08 08 # Source MUID 0x01020304 — M2-101 §5.2.1 / §3.3
+7F 7F 7F 7F # Destination Broadcast MUID — M2-101 §5.9 Table 12 / §3.3.3
+0D 18 2C 50 # Target MUID 0x0A0B0C0D — M2-101 §5.9 Table 12
