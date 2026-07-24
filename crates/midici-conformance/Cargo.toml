@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 midici-core = { path = "../midici-core" }
+rand = "0.8"
 
 [lints]
 workspace = true

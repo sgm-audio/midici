@@ -450,3 +450,88 @@ Done 1000000 runs in 58 second(s)
 ### Next phase
 - Phase 3 (not started): PE Capabilities + Get for DeviceInfo/ResourceList / further
   ARD §4–§5 surface — do not start in this session.
+
+---
+
+## Phase 3 — CiEngine management flows — 2026-07-24
+
+### Done
+- BUILD (`midici-core`): `CiEngine` per ARD §3 — `feed_sysex` / `poll(now)` /
+  `next_outbound` / `next_event`; sans-io (injected RNG + monotonic time).
+- Peer table: broadcast + directed Discovery → Reply; Reply parsing →
+  `PeerDiscovered`; per-peer CI version + `max_sysex = min(theirs, ours)`.
+- MUID collision (M2-101 §5.9.1 Option B / ARD §7): Invalidate → regenerate →
+  re-announce Discovery. Peer Invalidate → `PeerInvalidated` + teardown; self
+  Invalidate → regenerate + Discovery (no reply).
+- ACK/NAK plumbing with typed `NakCode`; `send_ack` / `send_endpoint_inquiry`
+  feature-masked so v1.1 peers never receive v1.2-only messages (ARD §4 / §7).
+- TESTS: state-machine model table (discovery, collision, invalidation,
+  unknown-MUID drop, malformed→NAK 0x41, reserved version→NAK 0x02, non-CI drop);
+  determinism (same seed+schedule); `midici-conformance` transcript replay with
+  goldens `exchanges/01-broadcast-discovery`, `02-directed-discovery`,
+  `03-collision`.
+- TAG: `phase-3-complete`.
+
+### Deviations from ARD (with reason)
+1. **`CiEvent` management subset**: ARD §3 lists PropertyGet/Set/Subscribe*
+   variants; Phase 3 emits only `PeerDiscovered` / `PeerInvalidated` / `Nak`.
+   Property events wait for PE engine wiring (AGENTS §11 — no stub variants).
+2. **Endpoint Inquiry reply**: inbound Endpoint Inquiry currently NAKs
+   `NotSupported` (Product Instance ID reply deferred). Feature mask still
+   blocks *sending* Endpoint/ACK to v1.1 peers.
+3. **`rand` in midici-conformance**: needed for transcript replay
+   (`StdRng::seed_from_u64`); justified as test/harness-only (already a
+   midici-core dev-dep).
+4. **Phase numbering vs Phase 2 “next” note**: Phase 2 PROGRESS pointed at PE
+   Capabilities next; this session’s Phase 3 is CiEngine management per the
+   explicit task scope (ARD §3/§4/§7).
+
+### DoD outputs (verbatim)
+
+#### `cargo test -p midici-core -p midici-conformance`
+```text
+running 3 tests
+test tests::goldens_dir_exists ... ok
+test tests::mgmt_goldens_byte_exact_roundtrip ... ok
+test tests::exchange_transcripts_byte_exact_replay ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 17 tests
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+running 2 tests
+test different_seed_diverges_after_collision ... ok
+test identical_seed_and_schedule_identical_outbound ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 15 tests
+test directed_discovery_same_as_broadcast_when_addressed_to_us ... ok
+test broadcast_discovery_replies_and_discovers_peer ... ok
+test inbound_nak_surfaces_typed_event ... ok
+test min_sysex_negotiation_clamps_floor ... ok
+test malformed_discovery_payload_nak_41 ... ok
+test muid_collision_on_discovery_invalidate_regenerate_reannounce ... ok
+test non_ci_sysex_silently_dropped ... ok
+test poll_accepts_monotonic_time ... ok
+test peer_invalidate_tears_down_and_emits_event ... ok
+test reply_to_discovery_records_peer ... ok
+test reserved_version_bits_nak_02 ... ok
+test self_invalidate_regenerates_and_reannounces ... ok
+test truncated_header_silently_dropped ... ok
+test unknown_muid_destination_silently_dropped ... ok
+test v1_1_peer_never_receives_ack_or_endpoint ... ok
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+#### `cargo clippy -p midici-core -p midici-conformance --all-targets -- -D warnings`
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
+```
+
+### Open items
+- HUMAN GATE G1 still open (mgmt goldens review).
+- Endpoint Product Instance ID reply; Property* `CiEvent` variants in later phase.
+
+### Next phase
+- Phase 4 (not started): PE Capabilities + Get / status mapping (NAK 341/413/445)
+  — do not start in this session.
