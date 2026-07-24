@@ -353,6 +353,10 @@ warning[license-not-encountered]: license was not encountered
 advisories ok, bans ok, licenses ok, sources ok
 ```
 
+### CI status
+- PR https://github.com/sgm-audio/midici/pull/5 — fmt/clippy/test/doc/deny green
+- Tag: `phase-1-complete`
+
 ### Open items
 - HUMAN GATE G1: Scott diff-reviews `goldens/mgmt/` vs M2-101 PDFs and clears VERIFY.md constructed-vector table
 - Do not start Phase 2 until G1 is cleared
