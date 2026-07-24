@@ -605,3 +605,7 @@ fuzz_reassemble: Done 100000 runs in 5 second(s)
 
 ### Next phase
 - Phase 5 (not started): do not start in this session.
+
+### CI / tag note
+- Branch: `cursor/phase-4-pe-get-d03b` @ `40d1e6e`
+- Tag `phase-4-complete` → `40d1e6e`
