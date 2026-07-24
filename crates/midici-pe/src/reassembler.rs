@@ -18,6 +18,8 @@
 //! rejected with [`PeError::Oversize`] before writing. A fifth concurrent
 //! transaction for a peer is rejected with [`PeError::TooManyConcurrent`]
 //! (no eviction to make room — LRU applies to inactivity timeout reclaim).
+//! When `max_peers` rows are all bound with at least one active slot, a new
+//! peer is rejected with [`PeError::PeerTableFull`] (not busy/445).
 //!
 //! On [`ReassembleEvent::Timeout`] or successful completion the slot is cleared
 //! (`clear` sets lengths to 0) and returned to the free list; capacities remain
@@ -351,7 +353,7 @@ impl Reassembler {
             self.peers[i].bound = true;
             return Ok(i);
         }
-        Err(PeError::TooManyConcurrent)
+        Err(PeError::PeerTableFull)
     }
 
     fn find_or_alloc_slot(

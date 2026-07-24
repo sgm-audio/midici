@@ -237,6 +237,19 @@ impl PeController {
                     &[],
                 )
             }
+            // Peer table pressure ≠ per-peer busy (445). // M2-103 §7.4.1 status 341
+            Err(crate::error::PeError::PeerTableFull) => {
+                self.clear_active(peer, chunk.request_id);
+                self.queue_get_reply(
+                    our_muid,
+                    peer,
+                    group,
+                    chunk.request_id,
+                    peer_max_sysex,
+                    PeStatus::Unavailable,
+                    &[],
+                )
+            }
             Err(_) => {
                 self.clear_active(peer, chunk.request_id);
                 self.queue_get_reply(

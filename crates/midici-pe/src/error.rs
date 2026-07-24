@@ -16,6 +16,11 @@ pub enum PeError {
     Oversize,
     /// More than four concurrent reassemblies for one peer. // ARD §6 / §7
     TooManyConcurrent,
+    /// Fixed peer table is full and every row still has an active reassembly.
+    ///
+    /// Distinct from [`Self::TooManyConcurrent`] (per-peer request cap). Callers
+    /// must not map this to MIDI-CI busy/445. // ARD §6 memory model
+    PeerTableFull,
     /// `numChunks` / `chunkNum` inconsistent with prior chunks of the transaction.
     InconsistentChunking,
     /// Mcoded7 input length is not a valid encoding (empty group remainder).

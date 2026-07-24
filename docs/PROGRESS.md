@@ -611,3 +611,9 @@ fuzz_reassemble: Done 100000 runs in 5 second(s)
 - Tag `phase-4-complete` → `3f7349b`
 - PR: ManagePullRequest/gh createPullRequest unavailable in this environment
   (open from https://github.com/sgm-audio/midici/pull/new/cursor/phase-4-pe-get-d03b)
+
+### Bugbot follow-up (peer table error) — 2026-07-24
+- Fixed: `Reassembler::bind_peer` returned `PeError::TooManyConcurrent` when the
+  fixed peer table was full; that variant is per-peer (5th concurrent tx → 445).
+  Added `PeError::PeerTableFull`; Phase-4 controller maps it to status 341
+  (`Unavailable`), not Busy/445. Test: `peer_table_full_is_not_too_many_concurrent`.
