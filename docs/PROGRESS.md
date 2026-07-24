@@ -360,3 +360,93 @@ advisories ok, bans ok, licenses ok, sources ok
 ### Next phase
 - Phase 2 (not started): PE / further protocol per ARD §4 — blocked on G1
 
+
+---
+
+## Phase 2 — PE encodings + chunking — 2026-07-24
+
+### Done
+- BUILD (`midici-pe`): Mcoded7 encode/decode (M2-103 §6.1.7); feature `zlib` →
+  `zlib+Mcoded7` via `miniz_oxide`; PE chunk framing (M2-101 Tables 33–35); Chunker
+  (clamp 128..=4096, requestId + 14-bit numChunks/chunkNum, header-in-first-chunk);
+  Reassembler keyed by `(peer MUID, requestId)` with 64 KiB/tx, 4 concurrent/peer,
+  LRU inactivity ordering, 3 s timeout → `ReassembleEvent::Timeout` (NAK 341 deferred
+  to Phase 4); pre-reserved buffers documented in rustdoc memory model.
+- TESTS: proptest split∘reassemble identity for payload 0..=64 KiB × chunk sizes
+  {128,256,512,1024,4096} with shuffled orderings; cap tests (oversize, 5th concurrent,
+  timeout reclaim via `MemoryStats` allocator-counting harness).
+- FUZZ: `crates/midici-pe/fuzz` targets `fuzz_mcoded7`, `fuzz_reassemble`; CI job
+  `fuzz-smoke` runs 60 s/target on nightly.
+- PR: https://github.com/sgm-audio/midici/pull/6 — CI green (fmt/clippy/test/doc/deny/fuzz-smoke).
+- TAG: `phase-2-complete` on the Phase 2 commit after DoD.
+
+### Deviations from ARD (with reason)
+1. **Allocator-counting harness**: workspace `unsafe_code = "forbid"` blocks a
+   `#[global_allocator]` counter inside `midici-pe`. Harness asserts via
+   `Reassembler::memory_stats()` that reserved bytes are fixed at construction and
+   that timeout clears `active_slots`/`active_bytes` (logical reclaim of pre-reserved
+   capacities). Same DoS properties; no RT/heap growth on the feed path.
+2. **`miniz_oxide` 0.8**: locked under feature `zlib` per ARD §2 (justification: only
+   RFC 1950 zlib codec on the allowlist path; no `std` requirement with `with-alloc`).
+3. **Fuzz runs use `cargo +nightly`**: `rust-toolchain.toml` pins stable 1.97.1;
+   cargo-fuzz requires nightly. Documented in CI and DoD commands below.
+4. **G1 human gate**: Phase 1 open item (golden review) still pending Scott; Phase 2
+   protocol bytes were taken from local M2-101/M2-103 PDFs under `docs/specs/`.
+
+### DoD outputs (verbatim)
+
+#### `cargo test -p midici-pe --all-features`
+```text
+running 8 tests
+test chunker::tests::clamp_range ... ok
+test chunker::tests::header_only_is_single_chunk ... ok
+test mcoded7::tests::empty_roundtrip ... ok
+test chunker::tests::each_chunk_fits_budget ... ok
+test mcoded7::tests::full_group_high_bits ... ok
+test mcoded7::tests::seven_byte_mixed_high_bits ... ok
+test mcoded7::tests::short_group_three_bytes ... ok
+test zlib_codec::tests::zlib_mcoded7_roundtrip ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 4 tests
+test fifth_concurrent_rejected ... ok
+test timeout_eviction_reclaims_slot_and_active_bytes ... ok
+test oversize_transaction_rejected ... ok
+test allocator_counting_harness_stable_reservation ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 4 tests
+test reverse_order_multi_chunk ... ok
+test edges_empty_and_max_body ... ok
+test mcoded7_roundtrip ... ok
+test split_reassemble_identity ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+```
+
+#### `cargo +nightly fuzz run fuzz_mcoded7 --fuzz-dir crates/midici-pe/fuzz -- -runs=1000000`
+```text
+#1000000	DONE   cov: 146 ft: 598 corp: 62/4597b lim: 4096 exec/s: 142857 rss: 483Mb
+Done 1000000 runs in 7 second(s)
+```
+
+#### `cargo +nightly fuzz run fuzz_reassemble --fuzz-dir crates/midici-pe/fuzz -- -runs=1000000`
+```text
+#1000000	DONE   cov: 363 ft: 2020 corp: 375/217Kb lim: 4096 exec/s: 17241 rss: 157Mb
+Done 1000000 runs in 58 second(s)
+```
+
+#### CI
+- PR #6 checks: fmt, clippy, test, doc, cargo-deny, fuzz-smoke — all successful
+  (https://github.com/sgm-audio/midici/pull/6).
+
+### Open items
+- HUMAN GATE G1 still open from Phase 1 (mgmt goldens review).
+- Phase 4 will map `ReassembleEvent::Timeout` → NAK status 341 and Oversize → 413 /
+  TooManyConcurrent → 445 at the engine layer.
+
+### Next phase
+- Phase 3 (not started): PE Capabilities + Get for DeviceInfo/ResourceList / further
+  ARD §4–§5 surface — do not start in this session.
