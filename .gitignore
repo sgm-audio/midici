@@ -12,3 +12,4 @@
 **/fuzz/target/
 *.profraw
 *.profdata
+*.src.rpm
