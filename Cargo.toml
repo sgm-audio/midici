@@ -20,7 +20,8 @@ authors = ["SGM Studios"]
 rust-version = "1.97.1"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# `deny` (not `forbid`) so FFI crates (transport-alsa) may `allow(unsafe_code)`.
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

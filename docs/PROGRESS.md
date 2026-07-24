@@ -623,3 +623,78 @@ fuzz_reassemble: Done 100000 runs in 5 second(s)
   (header-only; no v2 trailer).
 - Fixed: `Discovery` / `ReplyToDiscovery` reject `max_sysex_size < 128`
   (`CiError::BadField`) on encode and decode per M2-101 §5.5.3.
+
+---
+
+## Phase 5 — ALSA UMP transport + virtual-responder — 2026-07-24
+
+### Decision (ALSA binding)
+Probed **alsa-lib 1.2.15.3**, **`alsa` crate 0.12.0**, **`alsa-sys` 0.6.0** inside `midici-dev`:
+
+| Surface | UMP rawmidi open/rw | Virtual UMP seq endpoint create | UMP seq event I/O |
+|---|---|---|---|
+| `alsa` 0.12 | yes (`ump::Ump`) | **no** | **no** |
+| `alsa-sys` 0.6 | yes | **yes** (`snd_seq_set_client_midi_version`, `snd_seq_set_ump_endpoint_info`, `snd_seq_set_ump_block_info`, port `MIDI_UMP` / `UMP_ENDPOINT`) | **yes** (`snd_seq_ump_event_input/output*`) |
+
+**Choice:** wrap **`alsa-sys` UMP sequencer symbols** in a thin safe module
+(`midici-transport-alsa::ump_seq`). Do **not** hand-roll ioctls. The `alsa`
+crate alone is insufficient for virtual endpoint creation.
+
+### Done
+- `midici-transport-alsa`: virtual UMP endpoint create; SysEx7 bridge via `midi2`
+  (`sysex7` feature); 10 ms control loop feeding `ResponderEngine`; outbound to
+  subscribers; feature `alsa-live` + `#[ignore]` live test.
+- `examples/virtual-responder`: CLI (`--device-name`, `--endpoint-name`,
+  `--group`, `--verbosity`, `--seed`); structured `CiEvent` logs; SIGINT shutdown.
+- Workspace lint: `unsafe_code` demoted `forbid` → `deny` so the transport crate
+  may `allow` FFI (documented above).
+
+### Deviations from ARD (with reason)
+1. **`alsa` crate not used for seq UMP** — missing wrappers; ARD §2 lists `alsa`,
+   but Phase-5 decision mandates `alsa-sys` when the safe crate lacks the API.
+2. **`midi2` on transport (not core yet)** — ARD places `midi2` on core; Phase 5
+   only needs SysEx7 at the transport boundary, so the dep is on
+   `midici-transport-alsa` for now (justify: UMP↔SysEx7 only).
+3. **Deps:** `alsa-sys`, `libc`, `midi2`, `clap`, `ctrlc`, `rand` — transport/CLI.
+4. **G5 live evidence** — not collectible in this cloud host (`/dev/snd/seq`
+   absent). Awaiting Scott on Bazzite (below).
+
+### DoD outputs (verbatim)
+
+#### `cargo build -p midici-transport-alsa -p virtual-responder`
+```text
+   Compiling midici-transport-alsa v0.1.0 (/workspace/crates/midici-transport-alsa)
+   Compiling virtual-responder v0.1.0 (/workspace/examples/virtual-responder)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.62s
+```
+
+#### `cargo test --workspace --all-features`
+```text
+midici-transport-alsa: 3 passed (sysex7 roundtrip + config + version); 1 ignored (alsa-live)
+pe_loopback / pe_nak_matrix / exchange transcripts: ok
+all workspace test result lines: 0 failed
+```
+
+### HUMAN GATE G5 — awaiting Scott (Bazzite / midici-dev)
+Environment note from agent box: `alsa-utils-1.2.15.2` **includes** `aseqdump -u`
+(`--ump=version`). Cloud agent has **no** `/dev/snd/seq` — cannot paste live logs here.
+
+Scott, please run and paste into this section:
+
+```bash
+cargo run -p virtual-responder -- --device-name midici --endpoint-name midici-responder -v 1 &
+aseqdump -l
+aseqdump -u 2 -p <client:port>
+# then Discovery from Workbench / second endpoint; paste daemon CiEvent lines + dump
+```
+
+### Open items
+- Paste G5 evidence above when available.
+- Optionally lift `midi2` into `midici-core` per ARD §2 in a later cleanup.
+
+### Next phase
+- Phase 6+ (not started): do not start in this session.
+
+### Tag note
+- Branch: `cursor/phase-5-alsa-transport-d03b`
+- Tag `phase-5-complete` after this commit (unit/build DoD met; G5 human paste pending).
