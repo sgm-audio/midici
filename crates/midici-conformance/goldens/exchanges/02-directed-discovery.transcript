@@ -1,0 +1,13 @@
+# CONSTRUCTED exchange — directed Discovery (dest = our MUID) → Reply
+# M2-101 §5.5 / §5.6; Destination MUID addressing M2-101 §5.2.1
+SEED 0xC0FFEE
+IDENTITY 43 00 00 3 4 02 00 00 00
+MAX_SYSEX 512
+CAPS 08
+FB 7F
+PATH 00
+GROUP 0
+# Peer Discovery directed at engine MUID 0x0FBD995B, path id 5
+> 7E 7F 0D 70 02 04 06 08 08 5B 32 76 7D 7D 00 00 01 00 02 00 01 00 00 00 08 00 04 00 00 05
+# Reply echoes Output Path ID 5 — M2-101 §5.6.1
+< 7E 7F 0D 71 02 5B 32 76 7D 04 06 08 08 43 00 00 03 00 04 00 02 00 00 00 08 00 04 00 00 05 7F

@@ -121,6 +121,7 @@ name = "midici-conformance"
 version = "0.1.0"
 dependencies = [
  "midici-core",
+ "rand 0.8.7",
 ]
 
 [[package]]

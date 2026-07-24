@@ -6,6 +6,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod transcript;
+
 /// Package version from `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -85,11 +87,23 @@ mod tests {
                 "byte-exact mismatch for {}",
                 path.display()
             );
-            // decode∘encode∘decode identity
             let again = MgmtMessage::decode(&buf[..n]).unwrap();
             let mut buf2 = vec![0u8; n];
             let n2 = again.encode(&mut buf2).unwrap();
             assert_eq!(&buf2[..n2], &buf[..n]);
+        }
+    }
+
+    #[test]
+    fn exchange_transcripts_byte_exact_replay() {
+        let exchanges = transcript::load_exchange_transcripts().expect("load exchanges");
+        assert!(
+            exchanges.len() >= 3,
+            "expected ≥3 exchange transcripts, got {}",
+            exchanges.len()
+        );
+        for (path, t) in exchanges {
+            transcript::replay(&t).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         }
     }
 }

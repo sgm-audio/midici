@@ -1,0 +1,15 @@
+# CONSTRUCTED exchange — MUID collision on Discovery (Option B)
+# M2-101 §5.9.1 Option B / ARD §7: Invalidate → regenerate → re-announce Discovery
+SEED 0xC0FFEE
+IDENTITY 43 00 00 3 4 02 00 00 00
+MAX_SYSEX 512
+CAPS 08
+FB 7F
+PATH 00
+GROUP 0
+# Discovery with Source MUID == engine MUID 0x0FBD995B
+> 7E 7F 0D 70 02 5B 32 76 7D 7F 7F 7F 7F 7D 00 00 01 00 02 00 01 00 00 00 08 00 04 00 00 00
+# Invalidate targeting the duplicated MUID (broadcast dest) — M2-101 §5.9 Table 12
+< 7E 7F 0D 7E 02 5B 32 76 7D 7F 7F 7F 7F 5B 32 76 7D
+# Re-announce Discovery with new MUID 0x0A11562C
+< 7E 7F 0D 70 02 2C 2C 45 50 7F 7F 7F 7F 43 00 00 03 00 04 00 02 00 00 00 08 00 04 00 00 00
