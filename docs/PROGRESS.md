@@ -535,3 +535,7 @@ test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 ### Next phase
 - Phase 4 (not started): PE Capabilities + Get / status mapping (NAK 341/413/445)
   — do not start in this session.
+
+### CI note
+- PR #7 CI green (fmt/clippy/test/doc/deny/fuzz-smoke): https://github.com/sgm-audio/midici/pull/7
+- Tag `phase-3-complete` → `f4b6b3d`
