@@ -542,6 +542,15 @@ test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 
 ---
 
+## Bugbot — ACK v1.1 + min SysEx — 2026-07-24
+
+### Done
+- `Ack` encode/decode: Message Format Version 1.1 is header-only (parity with `Nak`). // M2-101 §5.10
+- `Discovery` / `ReplyToDiscovery` reject `max_sysex_size` &lt; 128. // M2-101 §5.5.3
+- Engine model test: sub-min Discovery → NAK Malformed (no peer accepted).
+
+---
+
 ## Phase 4 — PE Capabilities + Get / resources / status matrix — 2026-07-24
 
 ### Done
