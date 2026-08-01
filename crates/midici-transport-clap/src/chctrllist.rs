@@ -20,6 +20,7 @@
 //! because `get_info` in clap-sys 0.4 has signature
 //! `fn(plugin: *const clap_plugin, param_index: u32, param_info: *mut clap_param_info)`.
 
+#[cfg(feature = "clap-ffi")]
 use core::ffi::CStr;
 
 /// A single ChCtrlList entry. // M2-103 §6.3.2
@@ -75,9 +76,12 @@ impl ChCtrlList {
     /// `base_ctrl_index` sets the starting CC number (default: 20 to
     /// avoid well-known CCs 0–19).
     ///
+    /// Requires the `clap-ffi` feature.
+    ///
     /// # Safety
     ///
     /// `plugin` and `params` must be valid pointers for the duration.
+    #[cfg(feature = "clap-ffi")]
     pub unsafe fn from_clap_params(
         plugin: *const clap_sys::plugin::clap_plugin,
         params: *const clap_sys::ext::params::clap_plugin_params,
@@ -156,6 +160,8 @@ impl Default for ChCtrlList {
 
 /// Determine `CtrlType` from CLAP parameter flags and range.
 ///
+/// Requires the `clap-ffi` feature.
+///
 /// ## Assignment rules
 ///
 /// 1. `CLAP_PARAM_IS_PER_NOTE` → `Pnac`
@@ -164,6 +170,7 @@ impl Default for ChCtrlList {
 /// 4. `min==0, max≤16383` (14-bit) → `Cc`
 /// 5. Stepped/enum → `Cc`
 /// 6. Default → `Pnac`
+#[cfg(feature = "clap-ffi")]
 pub fn ctrl_type_from_flags(
     flags: clap_sys::ext::params::clap_param_info_flags,
     min: f64,
@@ -204,16 +211,19 @@ mod tests {
         assert!(list.entries.is_empty());
     }
 
+    #[cfg(feature = "clap-ffi")]
     #[test]
     fn ctrl_type_7bit_is_cc() {
         assert_eq!(ctrl_type_from_flags(0, 0.0, 127.0), CtrlType::Cc);
     }
 
+    #[cfg(feature = "clap-ffi")]
     #[test]
     fn ctrl_type_14bit_is_cc() {
         assert_eq!(ctrl_type_from_flags(0, 0.0, 16383.0), CtrlType::Cc);
     }
 
+    #[cfg(feature = "clap-ffi")]
     #[test]
     fn ctrl_type_stepped_is_cc() {
         use clap_sys::ext::params::CLAP_PARAM_IS_STEPPED;
@@ -223,6 +233,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "clap-ffi")]
     #[test]
     fn ctrl_type_per_note_is_pnac() {
         use clap_sys::ext::params::CLAP_PARAM_IS_PER_NOTE;
@@ -232,6 +243,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "clap-ffi")]
     #[test]
     fn ctrl_type_default_is_pnac() {
         assert_eq!(ctrl_type_from_flags(0, -24.0, 24.0), CtrlType::Pnac);
