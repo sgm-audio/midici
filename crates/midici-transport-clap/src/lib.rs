@@ -1,5 +1,3 @@
-#![allow(unsafe_code)]
-
 //! CLAP plugin transport adapter (RT-safe bridge).
 //!
 //! See `docs/ARD-001.md` §2 / §6. RT bridge implementation lands in later phases;
