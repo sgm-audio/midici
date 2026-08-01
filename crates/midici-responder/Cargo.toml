@@ -13,6 +13,3 @@ midici-core = { path = "../midici-core" }
 
 [lints]
 workspace = true
-
-[lints.rust]
-unsafe_code = "forbid"
