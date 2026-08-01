@@ -8,7 +8,8 @@
 //! ## Features
 //!
 //! - `clap-ffi` (off by default): enables `InputEvents` / `OutputEvents`
-//!   wrappers and `ControlBridge`. Requires `clap-sys`.
+//!   wrappers and `ControlBridge`. Requires `clap-sys`, `midici-core`,
+//!   and `rand_core`. Not yet wired — gated for future compile verification.
 //!
 //! See [`ChCtrlList`] and the [`chctrllist`] module.
 
@@ -16,14 +17,6 @@ pub mod chctrllist;
 pub mod ring;
 
 pub use ring::{Consumer, DefaultRing, Producer, Ring};
-
-// ── CLAP FFI wrappers (feature-gated) ────────────────────────
-
-#[cfg(feature = "clap-ffi")]
-mod clap_ffi;
-
-#[cfg(feature = "clap-ffi")]
-pub use clap_ffi::{ControlBridge, InputEvents, OutputEvents};
 
 // ── Tests ────────────────────────────────────────────────────
 
@@ -73,25 +66,5 @@ mod tests {
         assert_eq!(ring.drops(), 500);
         ring.reset_drops();
         assert_eq!(ring.drops(), 0);
-    }
-
-    #[cfg(feature = "clap-ffi")]
-    #[test]
-    fn control_bridge_construction() {
-        use midici_core::{CiConfig, DeviceIdentity};
-        use rand_core::SeedableRng;
-        use rand_xorshift::XorShiftRng;
-        let identity = DeviceIdentity {
-            manufacturer: [0x00, 0x11, 0x22],
-            family: 0x0102,
-            model: 0x0304,
-            software_revision: [0x01, 0x00, 0x00, 0x00],
-        };
-        let config = CiConfig::responder_default(identity);
-        let rng = XorShiftRng::seed_from_u64(42);
-        let engine = midici_core::CiEngine::new(config, rng);
-        let bridge = ControlBridge::new(engine);
-        assert_eq!(bridge.pending_len, 0);
-        let _muid = bridge.engine.muid();
     }
 }

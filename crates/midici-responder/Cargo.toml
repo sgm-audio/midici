@@ -8,8 +8,5 @@ repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
-[dependencies]
-midici-core = { path = "../midici-core" }
-
 [lints]
 workspace = true
