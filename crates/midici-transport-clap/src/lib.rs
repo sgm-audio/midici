@@ -1,6 +1,5 @@
 //! CLAP plugin transport adapter with RT-safe bridge. // ARD §6
 
-#![allow(unsafe_code)]
 
 pub mod ring;
 
