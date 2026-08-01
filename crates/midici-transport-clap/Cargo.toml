@@ -8,5 +8,19 @@ repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+[dependencies]
+clap-sys = "0.4"
+midici-core = { path = "../midici-core" }
+
+[dev-dependencies]
+rand_core = { version = "0.6.4", default-features = false }
+rand_xorshift = "0.4"
+
 [lints]
 workspace = true
+
+[lints.rust]
+# `unsafe` is required for the SPSC ring (raw pointers + atomics)
+# and CLAP FFI wrappers. All unsafe blocks are documented with SAFETY
+# comments and audited for the RT contract (§6).
+unsafe_code = "allow"
