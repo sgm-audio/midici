@@ -3,6 +3,8 @@
 //! See `docs/ARD-001.md` §2 / §6. RT bridge implementation lands in later phases;
 //! this crate currently exposes identity metadata only.
 
+#![allow(unsafe_code)]
+
 pub mod ring;
 
 pub use ring::{Consumer, DefaultRing, Producer, Ring};
