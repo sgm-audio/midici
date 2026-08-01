@@ -19,8 +19,5 @@ repository = "https://github.com/sgm-audio/midici"
 authors = ["SGM Studios"]
 rust-version = "1.97.1"
 
-[workspace.lints.rust]
-unsafe_code = "forbid"
-
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
