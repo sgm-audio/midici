@@ -10,7 +10,6 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-midici-transport-clap = { path = "../../crates/midici-transport-clap" }
 midici-responder = { path = "../../crates/midici-responder" }
 
 [lints]
