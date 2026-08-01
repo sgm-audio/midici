@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 //! CLAP plugin transport adapter with RT-safe bridge. // ARD §6
 //!
 //! ## ChCtrlList resource (§5)

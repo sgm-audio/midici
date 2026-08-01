@@ -15,6 +15,3 @@ midici-responder = { path = "../../crates/midici-responder" }
 
 [lints]
 workspace = true
-
-[lints.rust]
-unsafe_code = "allow"

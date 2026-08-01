@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 //! CLAP auto-property demo — ChCtrlList construction + ring exercise.
 //!
 //! Demonstrates building a `ChCtrlList` from plugin parameters and
