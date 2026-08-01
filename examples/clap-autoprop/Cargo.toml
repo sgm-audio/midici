@@ -9,16 +9,12 @@ authors.workspace = true
 rust-version.workspace = true
 publish = false
 
-[lib]
-crate-type = ["cdylib"]
-
 [dependencies]
-clap-sys = "0.4"
 midici-transport-clap = { path = "../../crates/midici-transport-clap" }
+midici-responder = { path = "../../crates/midici-responder" }
 
 [lints]
 workspace = true
 
 [lints.rust]
-# CLAP plugin requires `unsafe` for extern "C" callbacks and FFI.
 unsafe_code = "allow"
