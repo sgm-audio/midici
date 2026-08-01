@@ -2,7 +2,7 @@
 # License allowlist: MIT / Apache-2.0 / BSD / Zlib
 
 [graph]
-all-features = true
+all-features = false
 no-default-features = false
 
 [advisories]
