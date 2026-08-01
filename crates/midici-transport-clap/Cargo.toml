@@ -11,9 +11,9 @@ rust-version.workspace = true
 [dependencies]
 clap-sys = "0.4"
 midici-core = { path = "../midici-core" }
+rand_core = { version = "0.6.4", default-features = false }
 
 [dev-dependencies]
-rand_core = { version = "0.6.4", default-features = false }
 rand_xorshift = "0.4"
 
 [lints]
