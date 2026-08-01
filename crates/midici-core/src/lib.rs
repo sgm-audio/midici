@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 //! Sans-io MIDI Capability Inquiry (MIDI-CI) state machines.
 //!
 //! Phase 3 exposes the ARD §3 `CiEngine` surface for Management flows
