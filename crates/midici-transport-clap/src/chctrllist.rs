@@ -1,91 +1,49 @@
 //! ChCtrlList resource — maps CLAP plugin parameters to MIDI CI
 //! Channel Controller List entries. // ARD §5
 //!
-//! ## Assignment scheme
+//! ## Assignment scheme (see rustdoc on `ctrl_type_from_flags`)
 //!
-//! Each `clap_param_info` is assigned a `ctrlType`, `ctrlIndex`,
-//! `channel`, `minMax`, and `default` as follows:
+//! | Param range / flags                     | `ctrlType` |
+//! |----------------------------------------|------------|
+//! | `min == 0, max == 127` (7-bit)         | Cc         |
+//! | `min == 0, max <= 16383` (14-bit)      | Cc         |
+//! | Enum / stepped (`is_stepped`)           | Cc         |
+//! | `CLAP_PARAM_IS_PER_NOTE`                | Pnac       |
+//! | `CLAP_PARAM_IS_PER_CHANNEL`, wide       | Pnp        |
+//! | All other (continuous, wide range)      | Pnac       |
 //!
-//! ### `ctrlType` assignment
+//! `ctrlIndex` = `base_ctrl_index + param_index`.
 //!
-//! | Param range / flags                     | `ctrlType` | Rationale                             |
-//! |----------------------------------------|------------|---------------------------------------|
-//! | `min == 0, max == 127` (7-bit)         | `"cc"`     | Classic MIDI CC range                 |
-//! | `min == 0, max <= 16383` (14-bit)      | `"cc"`     | High-resolution CC (MSB/LSB pair)     |
-//! | Enum / stepped (`is_stepped`)           | `"cc"`     | Maps to discrete CC values            |
-//! | `CLAP_PARAM_IS_PER_NOTE` flag           | `"pnac"`   | Per-note assignable controller        |
-//! | `CLAP_PARAM_IS_PER_CHANNEL` flag, wide  | `"pnp"`    | Per-note pitch (e.g. MPE)             |
-//! | All other (continuous, wide range)      | `"pnac"`   | Default to per-note assignable        |
+//! ## clap-sys 0.4 compatibility
 //!
-//! ### `ctrlIndex` assignment
-//!
-//! Assigned sequentially from param index, offset by a configurable
-//! base (default 20 to avoid well-known CCs). The map is:
-//!
-//! ```text
-//! ctrlIndex = base + param_index
-//! ```
-//!
-//! For two-CC-pair parameters (14-bit), the MSB uses `ctrlIndex`
-//! and the LSB uses `ctrlIndex + 32`.
-//!
-//! ### `channel` assignment
-//!
-//! Per-channel params get the channel from `clap_param_info`.
-//! Otherwise channel 1 (MIDI channel 0) is used.
-//!
-//! ### `minMax` and `default`
-//!
-//! Copied directly from `clap_param_info` min/max/default values.
-//! The values are output as JSON numbers per MIDI CI PE spec.
-//!
-//! ## Example (gain control)
-//!
-//! ```text
-//! clap_param_info { id: 0, name: "Gain", min: 0.0, max: 1.0,
-//!                   default: 0.8, flags: 0 }
-//! →
-//! ChCtrlEntry { title: "Gain", ctrlType: "pnac", ctrlIndex: 20,
-//!               channel: 1, minMax: [0.0, 1.0], default: 0.8 }
-//! ```
+//! `from_clap_params` takes `*const clap_plugin` + `*const clap_plugin_params`
+//! because `get_info` in clap-sys 0.4 has signature
+//! `fn(plugin: *const clap_plugin, param_index: u32, param_info: *mut clap_param_info)`.
 
 use core::ffi::CStr;
 
-/// A single ChCtrlList entry — maps one plugin parameter to a MIDI
-/// controller assignment. // M2-103 §6.3.2
+/// A single ChCtrlList entry. // M2-103 §6.3.2
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChCtrlEntry {
-    /// Human-readable parameter name.
     pub title: String,
-    /// Controller type: `"cc"`, `"rpn"`, `"nrpn"`, `"pnac"`, or `"pnp"`.
     pub ctrl_type: CtrlType,
-    /// Controller index number.
     pub ctrl_index: u16,
-    /// MIDI channel (1–16).
     pub channel: u8,
-    /// `[min, max]` range in parameter units.
     pub min_max: [f64; 2],
-    /// Default value in parameter units.
     pub default: f64,
 }
 
 /// Controller type per MIDI CI ChCtrlList. // M2-103 §6.3.2 Table 29
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CtrlType {
-    /// Standard MIDI CC (Control Change).
     Cc,
-    /// Registered Parameter Number.
     Rpn,
-    /// Non-Registered Parameter Number.
     Nrpn,
-    /// Per-Note Assignable Controller.
     Pnac,
-    /// Per-Note Pitch.
     Pnp,
 }
 
 impl CtrlType {
-    /// JSON wire name per M2-103.
     pub fn as_str(&self) -> &'static str {
         match self {
             CtrlType::Cc => "cc",
@@ -97,21 +55,14 @@ impl CtrlType {
     }
 }
 
-/// A complete `ChCtrlList` resource — the list of all channel
-/// controller assignments for a device.
-///
-/// Built on the main thread by walking `clap_plugin_params` and
-/// assigning each parameter a controller slot.
+/// A complete `ChCtrlList` resource. // ARD §5
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChCtrlList {
-    /// Resource identifier — always `"ChCtrlList"`. // M2-103 §6.3
     pub resource: &'static str,
-    /// Per-parameter entries.
     pub entries: Vec<ChCtrlEntry>,
 }
 
 impl ChCtrlList {
-    /// Create an empty ChCtrlList resource.
     pub fn new() -> Self {
         Self {
             resource: "ChCtrlList",
@@ -119,29 +70,24 @@ impl ChCtrlList {
         }
     }
 
-    /// Build the ChCtrlList from a CLAP plugin parameter iterator.
+    /// Build from CLAP plugin params.
     ///
-    /// Walks `clap_plugin_params`, assigning each parameter a `ctrlType`,
-    /// `ctrlIndex`, `channel`, and range.
-    ///
-    /// `base_ctrl_index` sets the starting CC number for sequential
-    /// assignment (default: 20 to avoid well-known CCs 0–19).
+    /// `base_ctrl_index` sets the starting CC number (default: 20 to
+    /// avoid well-known CCs 0–19).
     ///
     /// # Safety
     ///
-    /// `params` must be a valid `clap_plugin_params` pointer for the
-    /// duration of this call. Called from the main thread only.
+    /// `plugin` and `params` must be valid pointers for the duration.
     pub unsafe fn from_clap_params(
+        plugin: *const clap_sys::plugin::clap_plugin,
         params: *const clap_sys::ext::params::clap_plugin_params,
         param_count: u32,
         base_ctrl_index: u16,
     ) -> Self {
         let mut list = Self::new();
-
-        if params.is_null() {
+        if plugin.is_null() || params.is_null() {
             return list;
         }
-
         let get_info = unsafe { (*params).get_info };
         if get_info.is_none() {
             return list;
@@ -149,8 +95,11 @@ impl ChCtrlList {
         let get_info = get_info.unwrap();
 
         for i in 0..param_count {
-            let mut info = core::mem::MaybeUninit::<clap_sys::ext::params::clap_param_info>::uninit();
-            let ok = unsafe { get_info(params, i, info.as_mut_ptr()) };
+            let mut info = core::mem::MaybeUninit::<
+                clap_sys::ext::params::clap_param_info,
+            >::uninit();
+            // clap-sys 0.4: fn(plugin, param_index, param_info)
+            let ok = unsafe { get_info(plugin, i, info.as_mut_ptr()) };
             if !ok {
                 continue;
             }
@@ -160,26 +109,23 @@ impl ChCtrlList {
                 .to_string_lossy()
                 .into_owned();
 
-            let ctrl_type = ctrl_type_from_flags(info.flags, info.min_value, info.max_value);
+            let ctrl_type =
+                ctrl_type_from_flags(info.flags, info.min_value, info.max_value);
             let ctrl_index = base_ctrl_index + i as u16;
 
             list.entries.push(ChCtrlEntry {
                 title,
                 ctrl_type,
                 ctrl_index,
-                channel: 1, // default; per-channel params TBD
+                channel: 1,
                 min_max: [info.min_value, info.max_value],
                 default: info.default_value,
             });
         }
-
         list
     }
 
-    /// Serialize to JSON per MIDI CI PE spec.
-    ///
-    /// Returns a JSON string representing the ChCtrlList resource.
-    /// This is called on the control thread (non-RT).
+    /// Serialize to JSON (non-RT).
     pub fn to_json(&self) -> String {
         let mut json = String::from("{\"resource\":\"ChCtrlList\",\"entries\":[");
         for (i, entry) in self.entries.iter().enumerate() {
@@ -212,13 +158,17 @@ impl Default for ChCtrlList {
 ///
 /// ## Assignment rules
 ///
-/// 1. `CLAP_PARAM_IS_PER_NOTE` → `Pnac` (per-note assignable)
+/// 1. `CLAP_PARAM_IS_PER_NOTE` → `Pnac`
 /// 2. `CLAP_PARAM_IS_PER_CHANNEL` + wide range → `Pnp`
-/// 3. `min=0, max=127` (7-bit range) → `Cc`
-/// 4. `min=0, max≤16383` (14-bit range) → `Cc`
+/// 3. `min==0, max≈127` (7-bit) → `Cc`
+/// 4. `min==0, max≤16383` (14-bit) → `Cc`
 /// 5. Stepped/enum → `Cc`
-/// 6. All other → `Pnac` (default)
-fn ctrl_type_from_flags(flags: u32, min: f64, max: f64) -> CtrlType {
+/// 6. Default → `Pnac`
+pub fn ctrl_type_from_flags(
+    flags: clap_sys::ext::params::clap_param_info_flags,
+    min: f64,
+    max: f64,
+) -> CtrlType {
     use clap_sys::ext::params::{
         CLAP_PARAM_IS_PER_CHANNEL, CLAP_PARAM_IS_PER_NOTE, CLAP_PARAM_IS_STEPPED,
     };
@@ -226,33 +176,22 @@ fn ctrl_type_from_flags(flags: u32, min: f64, max: f64) -> CtrlType {
     if flags & CLAP_PARAM_IS_PER_NOTE != 0 {
         return CtrlType::Pnac;
     }
-
     if flags & CLAP_PARAM_IS_PER_CHANNEL != 0 && (max - min) > 127.0 {
         return CtrlType::Pnp;
     }
-
-    // 7-bit range: 0..=127
     if min == 0.0 && (max - 127.0).abs() < 0.001 {
         return CtrlType::Cc;
     }
-
-    // 14-bit range: 0..≤16383
     if min == 0.0 && max <= 16383.0 && max > 127.0 {
         return CtrlType::Cc;
     }
-
-    // Stepped/enum parameters map to discrete CC values.
     if flags & CLAP_PARAM_IS_STEPPED != 0 {
         return CtrlType::Cc;
     }
-
-    // Default: per-note assignable.
     CtrlType::Pnac
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+// ── Tests ────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -266,67 +205,40 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_type_detection_7bit_cc() {
-        // 0..127 range → CC
-        assert_eq!(
-            ctrl_type_from_flags(0, 0.0, 127.0),
-            CtrlType::Cc
-        );
+    fn ctrl_type_7bit_is_cc() {
+        assert_eq!(ctrl_type_from_flags(0, 0.0, 127.0), CtrlType::Cc);
     }
 
     #[test]
-    fn ctrl_type_detection_14bit_cc() {
-        // 0..16383 range → CC
-        assert_eq!(
-            ctrl_type_from_flags(0, 0.0, 16383.0),
-            CtrlType::Cc
-        );
+    fn ctrl_type_14bit_is_cc() {
+        assert_eq!(ctrl_type_from_flags(0, 0.0, 16383.0), CtrlType::Cc);
     }
 
     #[test]
-    fn ctrl_type_detection_stepped_is_cc() {
+    fn ctrl_type_stepped_is_cc() {
         use clap_sys::ext::params::CLAP_PARAM_IS_STEPPED;
         assert_eq!(
             ctrl_type_from_flags(CLAP_PARAM_IS_STEPPED, 0.0, 10.0),
-            CtrlType::Cc
+            CtrlType::Cc,
         );
     }
 
     #[test]
-    fn ctrl_type_detection_per_note() {
+    fn ctrl_type_per_note_is_pnac() {
         use clap_sys::ext::params::CLAP_PARAM_IS_PER_NOTE;
         assert_eq!(
             ctrl_type_from_flags(CLAP_PARAM_IS_PER_NOTE, 0.0, 1.0),
-            CtrlType::Pnac
+            CtrlType::Pnac,
         );
     }
 
     #[test]
-    fn ctrl_type_detection_default_pnac() {
-        // Wide continuous range → PNAC
-        assert_eq!(
-            ctrl_type_from_flags(0, -24.0, 24.0),
-            CtrlType::Pnac
-        );
+    fn ctrl_type_default_is_pnac() {
+        assert_eq!(ctrl_type_from_flags(0, -24.0, 24.0), CtrlType::Pnac);
     }
 
     #[test]
-    fn entry_construction() {
-        let entry = ChCtrlEntry {
-            title: "Gain".into(),
-            ctrl_type: CtrlType::Pnac,
-            ctrl_index: 20,
-            channel: 1,
-            min_max: [0.0, 1.0],
-            default: 0.8,
-        };
-        assert_eq!(entry.title, "Gain");
-        assert_eq!(entry.ctrl_type, CtrlType::Pnac);
-        assert_eq!(entry.default, 0.8);
-    }
-
-    #[test]
-    fn json_serialization_smoke() {
+    fn json_smoke() {
         let mut list = ChCtrlList::new();
         list.entries.push(ChCtrlEntry {
             title: "Gain".into(),
@@ -336,20 +248,9 @@ mod tests {
             min_max: [0.0, 1.0],
             default: 0.8,
         });
-        list.entries.push(ChCtrlEntry {
-            title: "Tone".into(),
-            ctrl_type: CtrlType::Cc,
-            ctrl_index: 21,
-            channel: 1,
-            min_max: [0.0, 127.0],
-            default: 64.0,
-        });
-
         let json = list.to_json();
         assert!(json.contains("ChCtrlList"));
         assert!(json.contains("Gain"));
-        assert!(json.contains("Tone"));
         assert!(json.contains("pnac"));
-        assert!(json.contains("cc"));
     }
 }

@@ -15,7 +15,6 @@ crate-type = ["cdylib"]
 [dependencies]
 clap-sys = "0.4"
 midici-transport-clap = { path = "../../crates/midici-transport-clap" }
-midici-core = { path = "../../crates/midici-core" }
 
 [lints]
 workspace = true
