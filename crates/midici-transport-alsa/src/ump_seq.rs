@@ -232,14 +232,11 @@ fn set_endpoint_info(seq: *mut ffi::snd_seq_t, cfg: &EndpointConfig) -> Result<(
     alsa_check("snd_ump_endpoint_info_malloc", unsafe {
         ffi::snd_ump_endpoint_info_malloc(&mut info)
     })?;
+    let name = CString::new(cfg.endpoint_name.as_str())
+        .map_err(|_| TransportError::Config("endpoint name contains NUL"))?;
     unsafe {
         ffi::snd_ump_endpoint_info_clear(info);
-        ffi::snd_ump_endpoint_info_set_name(
-            info,
-            CString::new(cfg.endpoint_name.as_str())
-                .map_err(|_| TransportError::Config("endpoint name contains NUL"))?
-                .as_ptr(),
-        );
+        ffi::snd_ump_endpoint_info_set_name(info, name.as_ptr());
         ffi::snd_ump_endpoint_info_set_protocol_caps(
             info,
             ffi::SND_UMP_EP_INFO_PROTO_MIDI1 | ffi::SND_UMP_EP_INFO_PROTO_MIDI2,
@@ -264,6 +261,8 @@ fn set_block_info(seq: *mut ffi::snd_seq_t, cfg: &EndpointConfig, alsa_ump_group
     alsa_check("snd_ump_block_info_malloc", unsafe {
         ffi::snd_ump_block_info_malloc(&mut info)
     })?;
+    let name = CString::new(cfg.endpoint_name.as_str())
+        .map_err(|_| TransportError::Config("block name contains NUL"))?;
     unsafe {
         ffi::snd_ump_block_info_clear(info);
         ffi::snd_ump_block_info_set_block_id(info, 0);
@@ -277,12 +276,7 @@ fn set_block_info(seq: *mut ffi::snd_seq_t, cfg: &EndpointConfig, alsa_ump_group
             ffi::SND_UMP_BLOCK_INFO_DEFAULT_MIDI_CI_VERSION,
         );
         ffi::snd_ump_block_info_set_ui_hint(info, ffi::SND_UMP_BLOCK_UI_HINT_BOTH);
-        ffi::snd_ump_block_info_set_name(
-            info,
-            CString::new(cfg.endpoint_name.as_str())
-                .map_err(|_| TransportError::Config("block name contains NUL"))?
-                .as_ptr(),
-        );
+        ffi::snd_ump_block_info_set_name(info, name.as_ptr());
         let _ = alsa_ump_group; // port carries the group association
         let rc = ffi::snd_seq_set_ump_block_info(seq, 0, info as *const _);
         ffi::snd_ump_block_info_free(info);
