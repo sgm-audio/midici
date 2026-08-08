@@ -85,8 +85,12 @@ pub fn encode_reply_header(status: PeStatus, message: Option<&str>) -> PeResult<
         status: status.as_u16(),
         message: message.map(String::from),
     };
-    // Compact encoding (no whitespace).
-    serde_json::to_vec(&h).map_err(|_| PeStatus::BadRequest)
+    // Compact encoding (no whitespace); reject non-7-bit for SysEx-safe wire. // M2-103 §7.1
+    let bytes = serde_json::to_vec(&h).map_err(|_| PeStatus::BadRequest)?;
+    if bytes.iter().any(|b| *b > 0x7F) {
+        return Err(PeStatus::BadRequest);
+    }
+    Ok(bytes)
 }
 
 /// Serialize an inquiry header without whitespace.
@@ -95,7 +99,11 @@ pub fn encode_inquiry_header(resource: &str) -> PeResult<Vec<u8>> {
         resource: String::from(resource),
         res_id: None,
     };
-    serde_json::to_vec(&h).map_err(|_| PeStatus::BadRequest)
+    let bytes = serde_json::to_vec(&h).map_err(|_| PeStatus::BadRequest)?;
+    if bytes.iter().any(|b| *b > 0x7F) {
+        return Err(PeStatus::BadRequest);
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -136,5 +144,21 @@ mod tests {
         s.extend(core::iter::repeat_n(b'A', MAX_HEADER_JSON_BYTES));
         s.extend_from_slice(b"\"}");
         assert_eq!(parse_get_inquiry_header(&s), Err(PeStatus::BadRequest));
+    }
+
+    #[test]
+    fn encode_rejects_non_7bit() {
+        assert_eq!(
+            encode_inquiry_header("Devicé"),
+            Err(PeStatus::BadRequest)
+        );
+        assert_eq!(
+            encode_reply_header(PeStatus::Ok, Some("oké")),
+            Err(PeStatus::BadRequest)
+        );
+        let inquiry = encode_inquiry_header("DeviceInfo").unwrap();
+        assert!(inquiry.iter().all(|b| *b <= 0x7F));
+        let reply = encode_reply_header(PeStatus::Ok, Some("ok")).unwrap();
+        assert!(reply.iter().all(|b| *b <= 0x7F));
     }
 }
