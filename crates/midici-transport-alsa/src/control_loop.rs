@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use midici_core::spec::MIN_RECEIVABLE_SYSEX_SIZE;
 use midici_core::{CiConfig, CiEvent, DeviceIdentity};
 use midici_pe::{ResourceRegistry, ResponderEngine};
 use rand::rngs::StdRng;
@@ -31,7 +32,7 @@ pub struct LoopOptions {
 /// Open a virtual UMP endpoint and run the control loop until `running` is false.
 pub fn run_responder_loop(mut opts: LoopOptions) -> Result<()> {
     let mut cfg = CiConfig::responder_default(opts.identity);
-    cfg.max_sysex_size = opts.max_sysex.max(128);
+    cfg.max_sysex_size = opts.max_sysex.max(MIN_RECEIVABLE_SYSEX_SIZE);
     cfg.local_group = opts.endpoint.group;
     let registry = ResourceRegistry::with_device_info(opts.identity);
     let mut engine = ResponderEngine::new(cfg, StdRng::seed_from_u64(opts.seed), registry);
