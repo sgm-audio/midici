@@ -16,5 +16,8 @@ rand_core = { version = "0.6.4", default-features = false }
 proptest = "1.6"
 rand = "0.8"
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

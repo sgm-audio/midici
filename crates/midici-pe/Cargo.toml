@@ -24,5 +24,8 @@ serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 proptest = "1.6"
 rand = "0.8"
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

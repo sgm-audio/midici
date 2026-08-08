@@ -8,5 +8,8 @@ repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
