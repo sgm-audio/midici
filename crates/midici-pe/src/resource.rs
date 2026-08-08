@@ -122,6 +122,9 @@ impl PropertyResource for ResourceListResource {
             })
             .collect();
         let body = serde_json::to_vec(&entries).map_err(|_| PeStatus::BadRequest)?;
+        if body.iter().any(|b| *b > 0x7F) {
+            return Err(PeStatus::BadRequest);
+        }
         Ok(Payload { body })
     }
 }
