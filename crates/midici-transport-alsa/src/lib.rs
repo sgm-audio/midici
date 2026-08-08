@@ -13,6 +13,8 @@
 //! module (`ump_seq`). No hand-rolled ioctls.
 
 #![cfg(target_os = "linux")]
+// FFI adapter: allow `unsafe` while inheriting workspace lints via Cargo.toml.
+#![allow(unsafe_code)]
 
 pub mod control_loop;
 pub mod error;
