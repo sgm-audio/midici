@@ -1,5 +1,11 @@
 # HUMAN GATE G1 still open for Phase 1 mgmt goldens.
 
+Append-only. Modifying or deleting a golden requires a commit message line:
+
+`HUMAN-APPROVED-GOLDEN-CHANGE: <reason>`
+
+authored by Scott (`AGENTS.md` rule 7).
+
 ## Exchange transcripts (`goldens/exchanges/`)
 
 Byte-exact engine replay (`midici_conformance::transcript`). Phase 3 uses
