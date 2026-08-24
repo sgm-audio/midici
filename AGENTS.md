@@ -30,4 +30,25 @@
 
 ## Definition-of-done protocol
 15. A phase's DoD is a list of shell commands. Done = all exit 0 AND outputs pasted in
-    PROGRESS.md. Screenshots of green CI are not a substitute for local command output.
+ PROGRESS.md. Screenshots of green CI are not a substitute for local command output.
+
+## Cursor Cloud specific instructions
+- Environment: the Cursor Cloud VM is **Ubuntu 24.04**, not the Fedora `distrobox midici-dev`
+  described in rule 13. That distrobox does **not** exist here — run `cargo`/`rustfmt`/`clippy`
+  directly on the host. The pinned toolchain (`rust-toolchain.toml` → stable `1.97.1`, with
+  `rustfmt`+`clippy`) is managed by `rustup` and auto-installs on the first `cargo` call.
+- System deps: `libasound2-dev` + `alsa-utils` + `pkg-config` are pre-installed for the planned
+  ALSA transport (ARD §2/§9). No committed crate links ALSA yet, so builds do not require them today.
+- Cargo dependencies download from crates.io at build time; the startup update script runs
+  `cargo fetch` to pre-warm them. No other refresh step is needed.
+- **Known pre-existing breakage (not an env problem):** whole-workspace commands
+  (`cargo build/test/clippy --workspace`, `cargo fmt --all -- --check`) currently FAIL, isolated to
+  `crates/midici-transport-clap`. `src/ring.rs` uses `[u8; N * B]` (a const-generic expression that
+  needs nightly `generic_const_exprs`) and is also unformatted. This is the open item logged under
+  "Phase 6 CI debugging" in `docs/PROGRESS.md`; fix it there, do not treat it as a setup failure.
+- To build/test the crates that DO compile (the real protocol surface), scope commands, e.g.:
+  `cargo test -p midici-core -p midici-pe -p midici-conformance -p midici-responder -p midici-transport-alsa`
+  and `cargo clippy` / `cargo run` on the same set. `examples/virtual-responder` and
+  `examples/clap-autoprop` are placeholder binaries that just print `name version` today.
+- Optional extras: `midici-pe` has a `zlib` feature (`--all-features`); the `crates/midici-pe/fuzz`
+  targets need `cargo +nightly` + `cargo-fuzz` (not installed by default).
