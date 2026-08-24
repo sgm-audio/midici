@@ -551,6 +551,8 @@ test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 
 ---
 
+---
+
 ## Phase 4 — PE Capabilities + Get / resources / status matrix — 2026-07-24
 
 ### Done
@@ -707,8 +709,6 @@ aseqdump -u 2 -p <client:port>
 ### Tag note
 - Branch: `cursor/phase-5-alsa-transport-d03b`
 - Tag `phase-5-complete` after this commit (unit/build DoD met; G5 human paste pending).
-
----
 
 ---
 
