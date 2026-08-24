@@ -98,8 +98,8 @@ mod tests {
     fn exchange_transcripts_byte_exact_replay() {
         let exchanges = transcript::load_exchange_transcripts().expect("load exchanges");
         assert!(
-            exchanges.len() >= 3,
-            "expected ≥3 exchange transcripts, got {}",
+            exchanges.len() >= 4,
+            "expected ≥4 exchange transcripts, got {}",
             exchanges.len()
         );
         for (path, t) in exchanges {

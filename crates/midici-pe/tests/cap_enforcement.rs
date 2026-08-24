@@ -114,6 +114,22 @@ fn timeout_eviction_reclaims_slot_and_active_bytes() {
     assert_eq!(ra.memory_stats().active_slots, 1);
 }
 
+#[test]
+fn peer_table_full_is_not_too_many_concurrent() {
+    // One peer slot in the table; fill it with an incomplete tx, then a different
+    // MUID must surface PeerTableFull — not the per-peer TooManyConcurrent busy path.
+    let mut ra = Reassembler::new(1);
+    let p0 = peer(1);
+    let p1 = peer(2);
+    let raw0 = open_tx(1, 2000);
+    assert!(ra.feed(p0, &raw0, 1).unwrap().is_none());
+    let raw1 = open_tx(1, 2000);
+    assert_eq!(
+        ra.feed(p1, &raw1, 2).unwrap_err(),
+        PeError::PeerTableFull
+    );
+}
+
 /// Allocator-counting harness: reserved bytes are fixed at construction and do
 /// not grow across feed / timeout / reuse cycles (capacities pre-reserved).
 #[test]

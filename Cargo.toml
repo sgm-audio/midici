@@ -20,6 +20,8 @@ authors = ["SGM Studios"]
 rust-version = "1.97.1"
 
 [workspace.lints.rust]
+# Workspace default is `deny` so the ALSA FFI crate may `allow(unsafe_code)`.
+# Every non-FFI member sets `unsafe_code = "forbid"` in its own manifest.
 unsafe_code = "deny"
 
 [workspace.lints.clippy]

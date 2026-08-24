@@ -12,5 +12,8 @@ publish = false
 [dependencies]
 midici-responder = { path = "../../crates/midici-responder" }
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

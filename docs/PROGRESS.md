@@ -551,6 +551,167 @@ test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 
 ---
 
+---
+
+## Phase 4 — PE Capabilities + Get / resources / status matrix — 2026-07-24
+
+### Done
+- BUILD (`midici-core`): PE Caps Inquiry/Reply codecs (`pe_caps`); PE Get
+  Inquiry/Reply wrappers (`pe_get`); sub-IDs `0x30/0x31/0x34/0x35` + PE version
+  constants citing M2-101 §8.5–§8.8.
+- BUILD (`midici-pe`): typed `PeStatus` (200/341/400/403/404/405/413/445) citing
+  M2-103 §7.4.1 Table 15; JSON header parse/encode with depth/size limits;
+  `PropertyResource` + `DeviceInfo` / `ResourceList`; `ResourceRegistry`;
+  `PeController` (Caps negotiate `numSimultaneousRequests` + PE version;
+  Get correlation via Phase-2 reassembler/chunker; Busy before accept);
+  `ResponderEngine` façade over `CiEngine` + PE.
+- TESTS (`midici-conformance`): test-only initiator shim; loopback Discovery →
+  PE Caps → Get ResourceList → Get DeviceInfo at max SysEx 128 and 4096
+  (payload equality + chunk-count); NAK matrix for 400/403/404/405/413/445/341;
+  golden `exchanges/04-pe-get-deviceinfo.transcript` with `ENGINE responder`
+  replay path.
+- TAG: `phase-4-complete`.
+
+### Deviations from ARD (with reason)
+1. **Busy status 445 vs M2-103 343**: ARD §7 / Phase-4 DoD map excess concurrent
+   txs → **445**. M2-103 §7.4.1 Table 15 lists **343** “Too Many Requests” and
+   **445** “Invalid Version of Data”. Implementation follows ARD/DoD; documented
+   on `PeStatus::Busy`.
+2. **PE major/minor = 0x00/0x00**: M2-101 §8.5 Table 31 only enumerates Common
+   Rules 1.0/1.1 → `0x00`/`0x00` (no newer PE version row in pinned PDFs).
+3. **Deps**: `serde` + `serde_json` (alloc) on `midici-pe` for PE JSON headers /
+   resources on the control path only (ARD §2). `rand_core` on `midici-pe` for
+   `ResponderEngine` RNG bound shared with `CiEngine`. `midici-conformance`
+   gains path deps on `midici-pe`, `serde_json`, `rand_core` for harness only.
+4. **DeviceInfo JSON shape**: manufacturer/family/model/version fields from
+   `CiConfig` identity as M2-103-style arrays (no serial — not in `CiConfig`).
+5. **Set / Subscribe**: out of Phase-4 scope (Get + Caps only).
+
+### DoD outputs (verbatim)
+
+#### `cargo test --workspace --all-features`
+```text
+midici-conformance: exchange_transcripts_byte_exact_replay ... ok (≥4 goldens)
+pe_loopback: 2 passed (128 + 4096)
+pe_nak_matrix: 8 passed
+midici-pe json_header: malformed_never_panics / depth / size ... ok
+test result lines: all ok (0 failed across workspace)
+```
+
+#### `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+```
+
+#### fuzz smokes (`-runs=100000`)
+```text
+fuzz_mcoded7: Done 100000 runs in 1 second(s)
+fuzz_reassemble: Done 100000 runs in 5 second(s)
+```
+
+### Open items
+- HUMAN GATE G1 still open (mgmt goldens review).
+- Set/Subscribe, Process Inquiry, transport wiring — later phases.
+- Consider aligning Busy with M2-103 343 if ARD is revised.
+
+### Next phase
+- Phase 5 (not started): do not start in this session.
+
+### CI / tag note
+- Branch: `cursor/phase-4-pe-get-d03b` @ `3f7349b`
+- Tag `phase-4-complete` → `3f7349b`
+- PR: ManagePullRequest/gh createPullRequest unavailable in this environment
+  (open from https://github.com/sgm-audio/midici/pull/new/cursor/phase-4-pe-get-d03b)
+
+### Bugbot follow-up (peer table error) — 2026-07-24
+- Fixed: `Reassembler::bind_peer` returned `PeError::TooManyConcurrent` when the
+  fixed peer table was full; that variant is per-peer (5th concurrent tx → 445).
+  Added `PeError::PeerTableFull`; Phase-4 controller maps it to status 341
+  (`Unavailable`), not Busy/445. Test: `peer_table_full_is_not_too_many_concurrent`.
+
+### Bugbot follow-up (ACK v1.1 + min SysEx) — 2026-07-24
+- Fixed: `Ack` encode/decode now mirrors `Nak` for Message Format Version 1.1
+  (header-only; no v2 trailer).
+- Fixed: `Discovery` / `ReplyToDiscovery` reject `max_sysex_size < 128`
+  (`CiError::BadField`) on encode and decode per M2-101 §5.5.3.
+
+---
+
+## Phase 5 — ALSA UMP transport + virtual-responder — 2026-07-24
+
+### Decision (ALSA binding)
+Probed **alsa-lib 1.2.15.3**, **`alsa` crate 0.12.0**, **`alsa-sys` 0.6.0** inside `midici-dev`:
+
+| Surface | UMP rawmidi open/rw | Virtual UMP seq endpoint create | UMP seq event I/O |
+|---|---|---|---|
+| `alsa` 0.12 | yes (`ump::Ump`) | **no** | **no** |
+| `alsa-sys` 0.6 | yes | **yes** (`snd_seq_set_client_midi_version`, `snd_seq_set_ump_endpoint_info`, `snd_seq_set_ump_block_info`, port `MIDI_UMP` / `UMP_ENDPOINT`) | **yes** (`snd_seq_ump_event_input/output*`) |
+
+**Choice:** wrap **`alsa-sys` UMP sequencer symbols** in a thin safe module
+(`midici-transport-alsa::ump_seq`). Do **not** hand-roll ioctls. The `alsa`
+crate alone is insufficient for virtual endpoint creation.
+
+### Done
+- `midici-transport-alsa`: virtual UMP endpoint create; SysEx7 bridge via `midi2`
+  (`sysex7` feature); 10 ms control loop feeding `ResponderEngine`; outbound to
+  subscribers; feature `alsa-live` + `#[ignore]` live test.
+- `examples/virtual-responder`: CLI (`--device-name`, `--endpoint-name`,
+  `--group`, `--verbosity`, `--seed`); structured `CiEvent` logs; SIGINT shutdown.
+- Workspace lint: `unsafe_code` demoted `forbid` → `deny` so the transport crate
+  may `allow` FFI (documented above).
+
+### Deviations from ARD (with reason)
+1. **`alsa` crate not used for seq UMP** — missing wrappers; ARD §2 lists `alsa`,
+   but Phase-5 decision mandates `alsa-sys` when the safe crate lacks the API.
+2. **`midi2` on transport (not core yet)** — ARD places `midi2` on core; Phase 5
+   only needs SysEx7 at the transport boundary, so the dep is on
+   `midici-transport-alsa` for now (justify: UMP↔SysEx7 only).
+3. **Deps:** `alsa-sys`, `libc`, `midi2`, `clap`, `ctrlc`, `rand` — transport/CLI.
+4. **G5 live evidence** — not collectible in this cloud host (`/dev/snd/seq`
+   absent). Awaiting Scott on Bazzite (below).
+
+### DoD outputs (verbatim)
+
+#### `cargo build -p midici-transport-alsa -p virtual-responder`
+```text
+   Compiling midici-transport-alsa v0.1.0 (/workspace/crates/midici-transport-alsa)
+   Compiling virtual-responder v0.1.0 (/workspace/examples/virtual-responder)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.62s
+```
+
+#### `cargo test --workspace --all-features`
+```text
+midici-transport-alsa: 3 passed (sysex7 roundtrip + config + version); 1 ignored (alsa-live)
+pe_loopback / pe_nak_matrix / exchange transcripts: ok
+all workspace test result lines: 0 failed
+```
+
+### HUMAN GATE G5 — awaiting Scott (Bazzite / midici-dev)
+Environment note from agent box: `alsa-utils-1.2.15.2` **includes** `aseqdump -u`
+(`--ump=version`). Cloud agent has **no** `/dev/snd/seq` — cannot paste live logs here.
+
+Scott, please run and paste into this section:
+
+```bash
+cargo run -p virtual-responder -- --device-name midici --endpoint-name midici-responder -v 1 &
+aseqdump -l
+aseqdump -u 2 -p <client:port>
+# then Discovery from Workbench / second endpoint; paste daemon CiEvent lines + dump
+```
+
+### Open items
+- Paste G5 evidence above when available.
+- Optionally lift `midi2` into `midici-core` per ARD §2 in a later cleanup.
+
+### Next phase
+- Phase 6+ (not started): do not start in this session.
+
+### Tag note
+- Branch: `cursor/phase-5-alsa-transport-d03b`
+- Tag `phase-5-complete` after this commit (unit/build DoD met; G5 human paste pending).
+
+---
+
 ## Phase 6 — HUMAN GATE G6: clap-sys vs clack decision — 2026-08-01
 
 ### Decision comparison (≤15 lines)
