@@ -124,10 +124,7 @@ fn peer_table_full_is_not_too_many_concurrent() {
     let raw0 = open_tx(1, 2000);
     assert!(ra.feed(p0, &raw0, 1).unwrap().is_none());
     let raw1 = open_tx(1, 2000);
-    assert_eq!(
-        ra.feed(p1, &raw1, 2).unwrap_err(),
-        PeError::PeerTableFull
-    );
+    assert_eq!(ra.feed(p1, &raw1, 2).unwrap_err(), PeError::PeerTableFull);
 }
 
 /// Allocator-counting harness: reserved bytes are fixed at construction and do

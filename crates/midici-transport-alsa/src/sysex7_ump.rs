@@ -9,7 +9,7 @@ use midi2::sysex7::Sysex7;
 use crate::error::{Result, TransportError};
 
 /// Incremental reassembler for inbound SysEx7 UMP packets (2 words each).
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Sysex7Reassembler {
     words: Vec<u32>,
     group: Option<u8>,
@@ -18,11 +18,14 @@ pub struct Sysex7Reassembler {
 /// Completed SysEx7 body (F0/F7 stripped) with UMP group.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompleteSysex {
+    /// UMP group the message arrived on.
     pub group: u8,
+    /// SysEx body bytes (F0/F7 stripped). // ARD §3
     pub body: Vec<u8>,
 }
 
 impl Sysex7Reassembler {
+    /// Create an empty reassembler.
     pub fn new() -> Self {
         Self::default()
     }
@@ -66,9 +69,8 @@ impl Sysex7Reassembler {
         let group = self.group.unwrap_or(0);
         let words = std::mem::take(&mut self.words);
         self.group = None;
-        let borrowed = Sysex7::<&[u32]>::try_from(words.as_slice()).map_err(|_| {
-            TransportError::Ump("invalid SysEx7 UMP message")
-        })?;
+        let borrowed = Sysex7::<&[u32]>::try_from(words.as_slice())
+            .map_err(|_| TransportError::Ump("invalid SysEx7 UMP message"))?;
         let body: Vec<u8> = borrowed.payload().map(u8::from).collect();
         Ok(CompleteSysex { group, body })
     }
@@ -87,7 +89,9 @@ pub fn encode_sysex7_packets(group: u8, body: &[u8]) -> Result<Vec<[u32; 2]>> {
     msg.set_payload(body.iter().copied().map(u7::new));
     let data = msg.data();
     if data.len() % 2 != 0 {
-        return Err(TransportError::Ump("SysEx7 UMP length not multiple of 2 words"));
+        return Err(TransportError::Ump(
+            "SysEx7 UMP length not multiple of 2 words",
+        ));
     }
     let mut out = Vec::with_capacity(data.len() / 2);
     for chunk in data.chunks_exact(2) {

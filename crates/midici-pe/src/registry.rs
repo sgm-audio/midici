@@ -69,6 +69,31 @@ impl ResourceRegistry {
         r.get(query)
     }
 
+    /// Set by resource name. Default trait policy is read-only → 405.
+    /// // ARD §5; M2-103 §7.4.1
+    pub fn set(&mut self, name: &str, query: &PeQuery, body: &[u8]) -> PeResult<()> {
+        let r = self
+            .resources
+            .iter_mut()
+            .find(|r| r.resource() == name)
+            .ok_or(PeStatus::NotFound)?;
+        r.set(query, body)
+    }
+
+    /// True when `name` exists and declares itself subscribable. // M2-103 §11
+    pub fn subscribable(&self, name: &str) -> bool {
+        self.resources
+            .iter()
+            .find(|r| r.resource() == name)
+            .map(|r| r.subscribable())
+            .unwrap_or(false)
+    }
+
+    /// True when `name` exists (any writability).
+    pub fn contains(&self, name: &str) -> bool {
+        self.resources.iter().any(|r| r.resource() == name)
+    }
+
     /// Replace or insert a resource by name.
     pub fn resources_mut(&mut self) -> &mut Vec<Box<dyn PropertyResource>> {
         &mut self.resources

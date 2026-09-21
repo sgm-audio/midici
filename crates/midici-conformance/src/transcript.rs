@@ -39,6 +39,8 @@ pub struct ExchangeTranscript {
     pub config: CiConfig,
     pub engine: TranscriptEngine,
     pub steps: Vec<TranscriptStep>,
+    /// Register the canned `X-Test` resource (writable + subscribable). // Phase 7
+    pub with_xtest: bool,
 }
 
 /// Parse a `.transcript` file.
@@ -56,6 +58,7 @@ pub struct ExchangeTranscript {
 /// - `> [group] <hex...>` inbound
 /// - `< [group] <hex...>` expected outbound
 /// - `POLL <now_ms>`
+/// - `XTEST` — register the canned writable/subscribable `X-Test` resource (Phase 7)
 pub fn parse_transcript(name: &str, text: &str) -> Result<ExchangeTranscript, String> {
     let mut seed = 1u64;
     let mut identity = DeviceIdentity {
@@ -70,6 +73,7 @@ pub fn parse_transcript(name: &str, text: &str) -> Result<ExchangeTranscript, St
     let mut path = 0u8;
     let mut default_group = 0u8;
     let mut engine = TranscriptEngine::Ci;
+    let mut with_xtest = false;
     let mut steps = Vec::new();
 
     for (lineno, raw) in text.lines().enumerate() {
@@ -192,6 +196,9 @@ pub fn parse_transcript(name: &str, text: &str) -> Result<ExchangeTranscript, St
                     .map_err(|e| format!("line {}: POLL: {e}", lineno + 1))?;
                 steps.push(TranscriptStep::Poll { now_ms });
             }
+            "XTEST" => {
+                with_xtest = true;
+            }
             other => {
                 return Err(format!("line {}: unknown tag '{other}'", lineno + 1));
             }
@@ -211,6 +218,7 @@ pub fn parse_transcript(name: &str, text: &str) -> Result<ExchangeTranscript, St
         config,
         engine,
         steps,
+        with_xtest,
     })
 }
 
@@ -262,7 +270,10 @@ fn replay_ci(t: &ExchangeTranscript) -> Result<Muid, String> {
 }
 
 fn replay_responder(t: &ExchangeTranscript) -> Result<Muid, String> {
-    let registry = ResourceRegistry::with_device_info(t.config.identity);
+    let mut registry = ResourceRegistry::with_device_info(t.config.identity);
+    if t.with_xtest {
+        registry.register(Box::new(crate::test_resources::XTestResource::default()));
+    }
     let mut eng = ResponderEngine::new(t.config.clone(), StdRng::seed_from_u64(t.seed), registry);
     for (i, step) in t.steps.iter().enumerate() {
         match step {

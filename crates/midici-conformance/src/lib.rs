@@ -6,6 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod test_resources;
 pub mod transcript;
 
 /// Package version from `Cargo.toml`.

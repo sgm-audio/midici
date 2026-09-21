@@ -153,7 +153,12 @@ dependencies = [
 name = "clap-autoprop"
 version = "0.1.0"
 dependencies = [
+ "midici-core",
+ "midici-pe",
  "midici-responder",
+ "rand 0.8.7",
+ "rand_core 0.6.4",
+ "serde_json",
 ]
 
 [[package]]

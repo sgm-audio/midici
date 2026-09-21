@@ -813,3 +813,158 @@ aseqdump -u 2 -p <client:port>
   (also failed on main CI for this PR's initial run).
 - Once test/clippy/fmt pass: re-add chctrllist, DeviceInfo/ResourceList, then clap_ffi
   module behind feature gate. Build full autoprop cdylib and run clap-validator.
+
+---
+
+## Phase 7 — PE Set + Subscriptions + Notify — 2026-09-21
+
+### Done
+- **Spec grounding (AGENTS §5)**: read M2-101-UM v1.2.1 §8.9–§8.13 (pp. 54–58) and
+  M2-103 v1.2 §7.2/§7.4.1/§8.2/§11–§12 (pp. 28–49) directly from `docs/specs/*`.
+  All new constants/types carry section citations.
+- **`midici-core`**: Sub-ID consts 0x36/0x37/0x38/0x39/0x3F + `is_pe_chunked_sub_id`;
+  generic `PeMessage` (any chunked PE sub-ID); `pe_get::PeGetMessage` kept as alias.
+- **`midici-pe`**:
+  - `PeStatus::Accepted = 201` (see deviation 1).
+  - JSON headers: `SetInquiryHeader` (resource/resId/setPartial), `SubscriptionHeader`
+    (command start/partial/full/notify/end, subscribeId, endedBy), `SubReplyHeader`
+    (status first per M2-103 §7.1), legacy `NotifyHeader`; shared depth/size/7-bit
+    guards; encoders.
+  - `subscriptions.rs`: `SubId` (8-hex, deterministic counter), bounded
+    `SubscriptionTable` (32 global / 8 per peer → 445), `reap_peer`.
+  - `Reassembler::cancel` (legacy Notify status 144, M2-103 §12.1.3) and
+    `drop_peer`.
+  - `PeController`: chunked-inquiry pipeline generalized to Get/Set/Subscription
+    (kind-tracked per-peer Busy/timeout/error replies on the correct reply sub-ID);
+    Set → registry write policy (default 405) + `PeEvent::PropertySet`; Subscription
+    start/end with SubId allocation and 404/405; initiator-side partial/full/notify
+    → 400; legacy Notify receive-only handling;
+    `notify_resource_changed(resource, NotifyBody::{Notify,Partial,Full})`
+    fan-out per subscriber (M2-103 §11 update commands on `0x38` — Notify `0x3F`
+    is deprecated in M2-101 v1.2 §8.13, so Notify fan-out is *not* sent as 0x3F);
+    auto "notify" push to subscribers after a successful Set (M2-103 §11);
+    `reap_peer`; `next_pe_event`.
+  - `ResponderEngine`: `next_pe_event`, `notify_resource_changed`; peer-liveness
+    reaping — CI events are drained in `poll()` (PeerInvalidated → reap) into a
+    pending queue (`next_event` unchanged semantics), plus a peer-table diff as
+    belt-and-suspenders. // ARD §7 "subscription leak"; M2-103 §11.5
+- **Conformance**: `test_resources::XTestResource` (writable+subscribable, optional
+  403); initiator shim `set`/`subscribe_start`/`subscribe_end`/`invalidate`; reply
+  parsers; transcript grammar `XTEST` directive; tests:
+  - Set: 200 round-trip (value landed in resource), 403, 405 (trait default),
+    404, multi-chunk Set at max_sysex=128.
+  - Lifecycle: subscribe → partial notify → unsubscribe; subscribe → Invalidate
+    → reaped at `poll(1)` (SubscribeEnd event, no further fan-out).
+  - Set to subscribed resource → 0x37 200 + 0x38 `{"command":"notify"}`.
+  - Golden `goldens/exchanges/05-pe-set-subscribe.transcript` (constructed from a
+    seeded engine run; listed in VERIFY.md for human diff-review, same convention
+    as mgmt goldens G1).
+- **clap-autoprop**: `flush_param_change(engine, resource, partial_body)` — the
+  Phase-7 control-thread wiring an actual CLAP plugin's params-flush/timer path
+  will call; unit tests: no-subscriber no-op, subscribed peer receives 0x38
+  `{"command":"partial",…}` update. Control-thread only (ARD §6).
+- **Phase-6 carryover fixed (DoD required `cargo test --workspace`):**
+  - `ring.rs`: `[u8; N * B]` → `[[u8; B]; N]` (stable; layout-identical).
+  - `wrap_around` test logic fixed (it dropped 96 items then expected index 0).
+  - **miri found a real SPSC race**: `Consumer::pop` advanced/published read_idx
+    *before* returning the slot slice, letting the producer overwrite data the
+    consumer was still reading. API changed to `peek()` + `commit()`
+    (+ `pop_into` convenience), and `midici-transport-clap` now passes
+    `cargo +nightly miri test` (13 tests).
+  - transport-alsa missing-doc/Debug lint backlog fixed (clippy -D warnings gate).
+
+### Deviations from ARD (with reason)
+1. **Status 201, not 202**: ARD §4 lists "202" for Set; M2-103 v1.2 Table 15 defines
+   **201** (Accepted) and has no 202. Pinned spec wins; `PeStatus::Accepted = 201`.
+2. **Notify fan-out uses Subscription messages (0x38), not Notify (0x3F)**:
+   M2-101 v1.2.1 §8.13 deprecates Notify for sending ("Devices should not send a
+   Notify message"); M2-103 §11 routes all updates through Subscription with
+   command partial/full/notify. 0x3F is receive-only honored (status 144
+   terminates the named transaction). The ARD §3 event enum's shape was kept as
+   `PeEvent` in midici-pe rather than new `CiEvent` variants (core stays
+   management-only; PE events are control-plane JSON-owned).
+3. **SubId is Responder-allocated** 8-hex-char strings (M2-103 §11.1) rather than a
+   numeric id; ARD `SubId` realized as `midici_pe::SubId` value type.
+4. **Pre-existing breakage fixed in this phase** (ring.rs compile + wrap_around
+   test + miri race) because the Phase-7 DoD demands green workspace gates; the
+   AGENTS.md "known pre-existing breakage" note was updated accordingly.
+5. **No new third-party deps.** clap-autoprop gains path deps on midici-core/
+   midici-pe + dev rand/serde_json (already in-tree). cargo-deny clean.
+6. **Environment**: repo copy relocated to `C:\Users\scott\midici` (original lives
+   under `C:\Windows\System32` with read-only ACLs for user `scott`); builds run in
+   WSL Ubuntu with rustup 1.97.1 and a vendored `libasound2` (no root available);
+   64-bit `midici-transport-alsa` builds/tests/link against the vendored lib via
+   rpath. This substitutes for the `midici-dev` distrobox this host lacks.
+
+### DoD command outputs (verbatim, WSL `Ubuntu`)
+
+#### `cargo fmt --all -- --check`
+```text
+FMT_OK
+```
+
+#### `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+```text
+    Checking virtual-responder v0.1.0 (/mnt/c/Users/scott/midici/examples/virtual-responder)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.39s
+```
+
+#### `cargo test --workspace` (23 suites ok, 0 failed; Phase-7 suites verbatim)
+```text
+     Running tests/pe_set_subscribe.rs (…/pe_set_subscribe-1532fc39049b96b6)
+
+running 10 tests
+test set_default_read_only_405 ... ok
+test set_unknown_resource_404 ... ok
+test set_roundtrip_ok_200 ... ok
+test set_forbidden_403 ... ok
+test subscribe_not_subscribable_405 ... ok
+test subscribe_unknown_resource_404 ... ok
+test lifecycle_subscribe_notify_unsubscribe ... ok
+test set_multi_chunk_roundtrip ... ok
+test set_to_subscribed_resource_sends_notify ... ok
+test subscribe_then_peer_vanishes_reaped ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+…
+test tests::exchange_transcripts_byte_exact_replay ... ok   # incl. 05-pe-set-subscribe
+     Running unittests src/main.rs (…/clap_autoprop-…)
+test tests::subscribed_peer_receives_partial_notify_on_flush ... ok
+test tests::flush_without_subscribers_is_noop ... ok
+# 23 × "test result: ok", 0 failed across the workspace
+```
+
+#### fuzz smokes (`-runs=100000` each)
+```text
+fuzz_mcoded7:     Done 100000 runs in 1 second(s)
+fuzz_reassemble:  Done 100000 runs in 8 second(s)
+```
+
+#### `cargo +nightly miri test -p midici-transport-clap`
+```text
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.07s
+```
+
+#### `cargo deny check`
+```text
+advisories ok, bans ok, licenses ok, sources ok
+(warning: duplicate `syn` 2.x/3.x via midi2 — pre-existing)
+```
+
+### Open items
+- HUMAN GATE G1 still open (mgmt goldens review); now also VERIFY.md row for the
+  constructed `05-pe-set-subscribe` golden.
+- G5 live ALSA evidence still outstanding (needs `/dev/snd/seq` host).
+- clap-validator + `.clap` packaging remain Phase-6 leftovers (plugin binding
+  unfinished; Phase 7 ships the control-thread notify wiring only).
+- `ResourceList` canSubscribe flags not emitted yet (would change golden 04 =
+  append-only rule: needs HUMAN-APPROVED-GOLDEN-CHANGE).
+- The original tree under `C:\Windows\System32\midici` needs these commits pulled
+   in (read-only ACLs blocked in-place edits this session).
+
+### Next phase
+- Not started: v2 items / finish Phase 6 leftover CLAP binding. Do not start in
+  this session.
+
+### Tag
+- `phase-7-complete` on the Phase-7 commit.

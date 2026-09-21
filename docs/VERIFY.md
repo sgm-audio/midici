@@ -19,6 +19,12 @@ section citations. Scott must diff-review against the PDFs (HUMAN GATE G1) befor
 | `goldens/mgmt/06-ack.hex` | M2-101 §5.10 Table 13–14 (p.33–34) | Status ACK `0x00`; empty message text |
 | `goldens/mgmt/07-nak.hex` | M2-101 §5.11 Table 15–16 (p.35–36) | Status `0x01` not supported; empty text |
 
+### Constructed Phase-7 vectors (same caveat — no worked byte examples in the specs)
+
+| Golden | Spec anchor | Notes |
+|---|---|---|
+| `goldens/exchanges/05-pe-set-subscribe.transcript` | M2-101 §8.9–§8.12 Tables 35–38 (pp.55–58); M2-103 §7.2/§8.2/§11.1–11.2 (pp.40–44) | Caps → subscribe `X-Test` (subscribeId `00000001`) → Set `{"value":7}` → reply 200 + auto `{"command":"notify"}` → end. Deterministic (SEED 0xC0FFEE, engine-generated). Header first-property rule: request=`command`/`resource`, reply=`status`. |
+
 ### Encoding conventions used in constructed vectors
 
 - Multibyte numeric fields use 7-bit LSB-first packing (same scheme as MUID). // M2-101 §5.2.1 note / §3.3.3

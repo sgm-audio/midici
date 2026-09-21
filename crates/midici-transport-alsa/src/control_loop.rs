@@ -20,13 +20,30 @@ pub const CONTROL_TICK: Duration = Duration::from_millis(10);
 
 /// Options for [`run_responder_loop`].
 pub struct LoopOptions {
+    /// Virtual endpoint configuration (names, group, USB ids).
     pub endpoint: EndpointConfig,
+    /// MIDI-CI device identity (Discovery / DeviceInfo).
     pub identity: DeviceIdentity,
+    /// Maximum SysEx size we advertise and chunk toward.
     pub max_sysex: u32,
+    /// RNG seed for our MUID (deterministic tests).
     pub seed: u64,
     /// Called for every drained [`CiEvent`] (structured logging hook).
     pub on_event: Box<dyn FnMut(CiEvent) + Send>,
+    /// Shared shutdown flag; the loop exits when it goes false.
     pub running: Arc<AtomicBool>,
+}
+
+impl core::fmt::Debug for LoopOptions {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("LoopOptions")
+            .field("endpoint", &self.endpoint)
+            .field("identity", &self.identity)
+            .field("max_sysex", &self.max_sysex)
+            .field("seed", &self.seed)
+            .field("running", &self.running)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Open a virtual UMP endpoint and run the control loop until `running` is false.
@@ -92,7 +109,10 @@ pub fn run_responder_loop(mut opts: LoopOptions) -> Result<()> {
         }
     }
 
-    eprintln!("midici-transport-alsa: shutting down {}", ep.address_string());
+    eprintln!(
+        "midici-transport-alsa: shutting down {}",
+        ep.address_string()
+    );
     Ok(())
 }
 

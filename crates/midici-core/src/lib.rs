@@ -19,6 +19,7 @@ pub mod mgmt;
 pub mod muid;
 pub mod pe_caps;
 pub mod pe_get;
+pub mod pe_msg;
 pub mod spec;
 
 pub use config::{CiConfig, PeerState};
@@ -33,6 +34,7 @@ pub use mgmt::{
 pub use muid::Muid;
 pub use pe_caps::{pe_caps_inquiry, pe_caps_reply, PeCapabilities};
 pub use pe_get::PeGetMessage;
+pub use pe_msg::PeMessage;
 
 /// Package version from `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

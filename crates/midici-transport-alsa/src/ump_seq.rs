@@ -23,6 +23,16 @@ pub struct UmpSeqEndpoint {
     alsa_ump_group: u8,
 }
 
+impl core::fmt::Debug for UmpSeqEndpoint {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("UmpSeqEndpoint")
+            .field("client", &self.client)
+            .field("port", &self.port)
+            .field("alsa_ump_group", &self.alsa_ump_group)
+            .finish()
+    }
+}
+
 impl Drop for UmpSeqEndpoint {
     fn drop(&mut self) {
         if !self.seq.is_null() {
@@ -44,9 +54,13 @@ pub struct EndpointConfig {
     pub endpoint_name: String,
     /// UMP group nibble 0..=15 (mapped to ALSA port ump_group 1..=16).
     pub group: u8,
+    /// USB-MIDI style 24-bit manufacturer id (UMP Device Identity).
     pub manufacturer_id: u32,
+    /// UMP family id.
     pub family_id: u16,
+    /// UMP model id.
     pub model_id: u16,
+    /// UMP software revision (4 bytes).
     pub sw_revision: [u8; 4],
 }
 
@@ -68,7 +82,9 @@ impl UmpSeqEndpoint {
     /// Open sequencer, advertise UMP MIDI 2.0 endpoint + block, create port.
     pub fn create(cfg: &EndpointConfig) -> Result<Self> {
         if cfg.client_name.is_empty() || cfg.endpoint_name.is_empty() {
-            return Err(TransportError::Config("client/endpoint name must be non-empty"));
+            return Err(TransportError::Config(
+                "client/endpoint name must be non-empty",
+            ));
         }
         if cfg.group > 15 {
             return Err(TransportError::Config("UMP group must be 0..=15"));
@@ -77,20 +93,15 @@ impl UmpSeqEndpoint {
 
         let mut seq: *mut ffi::snd_seq_t = ptr::null_mut();
         // DUPLEX open. // alsa-lib seq.h
-        alsa_check(
-            "snd_seq_open",
-            unsafe {
-                ffi::snd_seq_open(
-                    &mut seq,
-                    c"default".as_ptr(),
-                    ffi::SND_SEQ_OPEN_DUPLEX as c_int,
-                    0,
-                )
-            },
-        )?;
-        alsa_check("snd_seq_nonblock", unsafe {
-            ffi::snd_seq_nonblock(seq, 1)
+        alsa_check("snd_seq_open", unsafe {
+            ffi::snd_seq_open(
+                &mut seq,
+                c"default".as_ptr(),
+                ffi::SND_SEQ_OPEN_DUPLEX as c_int,
+                0,
+            )
         })?;
+        alsa_check("snd_seq_nonblock", unsafe { ffi::snd_seq_nonblock(seq, 1) })?;
 
         let client_cstr = CString::new(cfg.client_name.as_str())
             .map_err(|_| TransportError::Config("client name contains NUL"))?;
@@ -126,10 +137,12 @@ impl UmpSeqEndpoint {
         })
     }
 
+    /// ALSA sequencer client id.
     pub fn client_id(&self) -> i32 {
         self.client
     }
 
+    /// ALSA sequencer port id.
     pub fn port_id(&self) -> i32 {
         self.port
     }
@@ -217,7 +230,12 @@ impl UmpSeqEndpoint {
             n as usize
         ];
         let filled = unsafe {
-            ffi::snd_seq_poll_descriptors(self.seq, fds.as_mut_ptr(), n as c_uint, libc::POLLIN as c_short)
+            ffi::snd_seq_poll_descriptors(
+                self.seq,
+                fds.as_mut_ptr(),
+                n as c_uint,
+                libc::POLLIN as c_short,
+            )
         };
         alsa_check("snd_seq_poll_descriptors", filled)?;
         fds.truncate(filled as usize);
@@ -256,7 +274,11 @@ fn set_endpoint_info(seq: *mut ffi::snd_seq_t, cfg: &EndpointConfig) -> Result<(
     Ok(())
 }
 
-fn set_block_info(seq: *mut ffi::snd_seq_t, cfg: &EndpointConfig, alsa_ump_group: u8) -> Result<()> {
+fn set_block_info(
+    seq: *mut ffi::snd_seq_t,
+    cfg: &EndpointConfig,
+    alsa_ump_group: u8,
+) -> Result<()> {
     let mut info: *mut ffi::snd_ump_block_info_t = ptr::null_mut();
     alsa_check("snd_ump_block_info_malloc", unsafe {
         ffi::snd_ump_block_info_malloc(&mut info)
