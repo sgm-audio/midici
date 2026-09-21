@@ -1,4 +1,81 @@
 //! Combined Management + PE responder façade. // ARD §3 / §4
+//!
+//! ## Example: complete Discovery → PE Caps → Get exchange (loopback)
+//!
+//! ```
+//! use midici_core::spec::{CAP_PROPERTY_EXCHANGE, SUB_ID2_DISCOVERY};
+//! use midici_core::{mgmt_header, CiConfig, DeviceIdentity, Discovery, Muid, PeMessage};
+//! use midici_pe::{encode_inquiry_header, split, ResponderEngine, ResourceRegistry};
+//!
+//! struct Seeded(u32);
+//! impl rand_core::RngCore for Seeded {
+//!     fn next_u32(&mut self) -> u32 {
+//!         self.0 = self.0.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
+//!         self.0
+//!     }
+//!     fn next_u64(&mut self) -> u64 {
+//!         (u64::from(self.next_u32()) << 32) | u64::from(self.next_u32())
+//!     }
+//!     fn fill_bytes(&mut self, buf: &mut [u8]) {
+//!         let mut n = 0;
+//!         while n < buf.len() {
+//!             let b = self.next_u32().to_le_bytes();
+//!             let take = b.len().min(buf.len() - n);
+//!             buf[n..n + take].copy_from_slice(&b[..take]);
+//!             n += take;
+//!         }
+//!     }
+//!     fn try_fill_bytes(&mut self, b: &mut [u8]) -> Result<(), rand_core::Error> {
+//!         self.fill_bytes(b);
+//!         Ok(())
+//!     }
+//! }
+//!
+//! let identity = DeviceIdentity {
+//!     manufacturer: [0x7D, 0, 0],
+//!     family: 1,
+//!     model: 2,
+//!     software_revision: [1, 0, 0, 0],
+//! };
+//! let registry = ResourceRegistry::with_device_info(identity);
+//! let mut eng = ResponderEngine::new(CiConfig::responder_default(identity), Seeded(7), registry);
+//!
+//! // Peer broadcasts Discovery.
+//! let peer = Muid::ordinary(0x01020304).unwrap();
+//! let disc = Discovery {
+//!     header: mgmt_header(SUB_ID2_DISCOVERY, peer, Muid::BROADCAST),
+//!     manufacturer: [0x7D, 0, 0],
+//!     family: 5,
+//!     model: 6,
+//!     software_revision: [1, 0, 0, 0],
+//!     category_supported: CAP_PROPERTY_EXCHANGE,
+//!     max_sysex_size: 512,
+//!     output_path_id: 0,
+//! };
+//! let mut buf = [0u8; 64];
+//! let n = disc.encode(&mut buf).unwrap();
+//! eng.feed_sysex(0, &buf[..n]).unwrap();
+//! assert!(eng.next_outbound().is_some()); // Reply to Discovery
+//!
+//! // Peer asks for DeviceInfo (single chunk fits easily).
+//! let header = encode_inquiry_header("DeviceInfo").unwrap();
+//! let chunks = split(1, &header, &[], 512).unwrap();
+//! let msg = PeMessage {
+//!     header: midici_core::CiHeader {
+//!         device_id: 0x7F,
+//!         sub_id2: midici_core::spec::SUB_ID2_PE_GET_INQUIRY,
+//!         version: 0x02,
+//!         source: peer,
+//!         dest: eng.muid(),
+//!     },
+//!     pe_payload: chunks.into_iter().next().unwrap(),
+//! }
+//! .to_vec()
+//! .unwrap();
+//! eng.feed_sysex(0, &msg).unwrap();
+//! let reply = eng.next_outbound().unwrap(); // Reply to Get, status 200
+//! assert_eq!(reply.body[3], 0x35); // sub-ID#2: PE Get Reply
+//! ```
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;

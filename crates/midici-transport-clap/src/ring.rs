@@ -3,6 +3,28 @@
 //! Two unidirectional rings (inbound, outbound) carry SysEx byte chunks
 //! between the audio thread and the control thread.
 //!
+//! Consumption is two-phase — [`Consumer::peek`] returns a slice into the
+//! slot, [`Consumer::commit`] publishes it as consumed — so the producer can
+//! never overwrite bytes the reader is still using (miri-verified).
+//!
+//! ## Example
+//!
+//! ```
+//! use midici_transport_clap::{Consumer, Producer, Ring};
+//!
+//! let ring: Ring<4, 64> = Ring::new();
+//! // SAFETY: this thread owns both sides for the demo; in production each
+//! // half is owned by exactly one thread (SPSC).
+//! let mut prod = unsafe { Producer::new(&ring) };
+//! let mut cons = unsafe { Consumer::new(&ring) };
+//!
+//! assert!(prod.push(b"hello")); // whole slot is written, zero-padded
+//! let slot = cons.peek().unwrap();
+//! assert_eq!(&slot[..5], b"hello");
+//! cons.commit(); // publish as consumed — only now may the producer reuse it
+//! assert!(cons.peek().is_none());
+//! ```
+//!
 //! ## Geometry
 //!
 //! Const-generic: `N` slots of `B` bytes each. Default is 64 × 512 B

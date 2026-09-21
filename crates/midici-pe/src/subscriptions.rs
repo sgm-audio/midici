@@ -1,5 +1,20 @@
 //! PE subscription table: SubId allocation, fan-out lookup, peer reaping.
 //! // M2-103 §11 / §11.5; ARD §7 "subscription leak"
+//!
+//! ## Example
+//!
+//! ```
+//! use midici_core::Muid;
+//! use midici_pe::SubscriptionTable;
+//!
+//! let mut subs = SubscriptionTable::new();
+//! let peer = Muid::ordinary(0x01020304).unwrap();
+//! let id = subs.start(peer, 0, 512, "ChCtrlList", None).unwrap();
+//! assert_eq!(id.as_str(), "00000001"); // deterministic, reusable after end
+//! assert_eq!(subs.for_resource("ChCtrlList").count(), 1);
+//! assert_eq!(subs.reap_peer(peer).len(), 1); // peer vanished → subscriptions end
+//! assert!(subs.is_empty());
+//! ```
 
 use alloc::string::String;
 use alloc::vec::Vec;

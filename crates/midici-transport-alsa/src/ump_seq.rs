@@ -1,6 +1,6 @@
 //! Thin safe wrappers around `alsa-sys` UMP sequencer symbols.
 //!
-//! The `alsa` 0.12 crate exposes rawmidi [`alsa::Ump`] open/read/write but does
+//! The `alsa` 0.12 crate exposes rawmidi UMP open/read/write but does
 //! **not** wrap sequencer virtual-endpoint APIs (`snd_seq_set_client_midi_version`,
 //! `snd_seq_set_ump_endpoint_info`, `snd_seq_ump_event_*`). Those live in
 //! `alsa-sys` 0.6 (bound against alsa-lib ≥ 1.2.10). // ARD §2 / Phase 5 decision

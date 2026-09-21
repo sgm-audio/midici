@@ -68,6 +68,16 @@ jobs:
           command: check
           rust-version: "1.97.1"
 
+  link-check:
+    name: link-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lycheeverse/lychee-action@v1
+        with:
+          args: "--verbose --no-progress README.md docs/guide/ CHANGELOG.md"
+          fail: true
+
   fuzz-smoke:
     name: fuzz-smoke (60s/target)
     runs-on: ubuntu-latest

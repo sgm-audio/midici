@@ -968,3 +968,59 @@ advisories ok, bans ok, licenses ok, sources ok
 
 ### Tag
 - `phase-7-complete` on the Phase-7 commit.
+
+---
+
+## Phase 9 — Documentation — 2026-09-21
+
+### Done
+- A pre-existing untracked docs draft set (per-crate READMEs, 4 guide pages,
+  CHANGELOG.md, cliff.toml, CI link-check job) was audited line-by-line against
+  the actual tree (G9 honesty rule). Corrected fabrications/staleness:
+  - `midici-responder` is a reserved crate (façade lives at
+    `midici_pe::ResponderEngine`); README rewritten to say so.
+  - `midici-transport-clap` README claimed `ControlBridge`/`InputEvents`/
+    `OutputEvents`/`chctrllist.rs` — none exist; rewritten to the actual scope
+    (Ring/Producer/Consumer with peek/commit) + "lands next" section.
+  - rt-contract.md ring diagram/API updated (`[[u8; B]; N]`, peek/commit,
+    miri note); architecture.md events split into `CiEvent` (management) +
+    `PeEvent` (PE); writing-a-transport.md uses `midici_pe::ResponderEngine`.
+  - integrating-a-clap-plugin.md rewritten: real `flush_param_change` wiring;
+    plugin binary marked as landing with Phase 6/8.
+  - README.md: stale "Get only" claims → Set/Subscribe ✅ rows; autoprop story
+    rewritten accurately; dead `docs/media/autoprop.cast` link removed (G9a:
+    linked only after the file exists).
+- rustdoc: `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS="-D warnings"`
+  zero warnings (fixed broken `alsa::Ump` intra-doc link).
+- Doctests: added 8 compiling doctests (core Discovery flow, PE registry,
+  custom resource, mcoded7 roundtrip, chunker split, SubscriptionTable,
+  full ResponderEngine loopback, ring peek/commit).
+- CHANGELOG.md: merged with `git-cliff` (cliff.toml template fixed) +
+  hand-edited 0.1.0 summary paragraph.
+- Link check: lychee over README + all crate READMEs + docs/guide + CHANGELOG
+  + AGENTS/ARD/VERIFY — 11 links, 0 errors (online mode).
+
+### Deviations from ARD (with reason)
+- None in code; docs-only phase. Existing runs in WSL environment as in Phase 7.
+
+### Open items
+- HUMAN GATE G9: Scott reads the guide + READMEs.
+- G9a: record `docs/media/autoprop.cast`, then add the README demo link.
+
+### DoD outputs (verbatim, WSL Ubuntu)
+```text
+cargo fmt --all -- --check → FMT_OK
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.81s
+cargo doc --workspace --no-deps  (RUSTDOCFLAGS="-D warnings")
+    Finished (DOC_OK, zero warnings)
+cargo test --doc --workspace
+    8 doctests ok (6 suites), 0 failed
+cargo test --workspace
+    23 × "test result: ok", 0 failed
+lychee (online) README + crate READMEs + docs/guide + CHANGELOG + AGENTS/ARD/VERIFY
+    🔍 11 Total ✅ 11 OK 🚫 0 Errors
+```
+
+### Tag
+- `phase-9-complete` on the phase commit.

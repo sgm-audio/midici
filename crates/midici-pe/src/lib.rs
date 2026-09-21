@@ -2,6 +2,45 @@
 //!
 //! Phase 2: Mcoded7, chunker, reassembler.
 //! Phase 4: PE Capabilities/Get pipeline, resources, JSON headers (`docs/ARD-001.md` §4–§5).
+//! Phase 7: Set + Subscriptions + Notify fan-out (M2-101 §8.9–8.13, M2-103 §8.2/§11).
+//!
+//! ## Example: serve `DeviceInfo` from the registry
+//!
+//! ```
+//! use midici_core::DeviceIdentity;
+//! use midici_pe::{PeQuery, ResourceRegistry};
+//!
+//! let identity = DeviceIdentity {
+//!     manufacturer: [0x7D, 0, 0],
+//!     family: 1,
+//!     model: 2,
+//!     software_revision: [1, 0, 0, 0],
+//! };
+//! let registry = ResourceRegistry::with_device_info(identity);
+//! let payload = registry.get("DeviceInfo", &PeQuery::default()).unwrap();
+//! // Property bodies are 7-bit JSON. // M2-103 §6.2.1
+//! assert!(payload.body.iter().all(|b| *b <= 0x7F));
+//! assert!(registry.get("Nope", &PeQuery::default()).is_err());
+//! ```
+//!
+//! ## Example: custom writable + subscribable resource
+//!
+//! ```
+//! use midici_pe::{Payload, PeQuery, PeResult, PropertyResource, ResourceRegistry};
+//!
+//! struct Mode;
+//! impl PropertyResource for Mode {
+//!     fn resource(&self) -> &str { "Mode" }
+//!     fn get(&self, _: &PeQuery) -> PeResult<Payload> {
+//!         Ok(Payload { body: b"\"live\"".to_vec() })
+//!     }
+//!     // `set` defaults to read-only (405); `subscribable` defaults to false.
+//! }
+//! let mut registry = ResourceRegistry::new();
+//! registry.register(Box::new(Mode));
+//! assert!(registry.subscribable("Mode") == false);
+//! assert!(registry.set("Mode", &PeQuery::default(), b"\"x\"").is_err()); // 405
+//! ```
 
 #![no_std]
 

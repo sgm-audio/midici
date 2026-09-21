@@ -1,4 +1,17 @@
 //! Split PE header+body across SysEx-sized chunks. // M2-101 §8.3 / M2-103 §5.2
+//!
+//! ## Example
+//!
+//! ```
+//! // Split a header+body into PE chunk payloads for a 128-byte negotiated SysEx.
+//! let chunks = midici_pe::split(1, br#"{"status":200}"#, &[b'x'; 500], 128).unwrap();
+//! assert!(chunks.len() > 1, "500 property bytes don't fit one 128-byte SysEx");
+//! // Each chunk is a self-describing PE payload (requestId + framing + data).
+//! for c in &chunks {
+//!     let chunk = midici_pe::PeChunk::decode(c).unwrap();
+//!     assert_eq!(chunk.request_id, 1);
+//! }
+//! ```
 
 use alloc::vec::Vec;
 
