@@ -17,6 +17,8 @@ pub const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 
 #[cfg(test)]
 mod tests {
+    use super::{ResourceRegistry, ResponderEngine};
+
     #[test]
     fn version_is_nonempty() {
         assert!(!crate::VERSION.is_empty());

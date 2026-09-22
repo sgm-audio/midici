@@ -1024,3 +1024,53 @@ lychee (online) README + crate READMEs + docs/guide + CHANGELOG + AGENTS/ARD/VER
 
 ### Tag
 - `phase-9-complete` on the phase commit.
+
+---
+
+## Phase 10 — Release 0.1.0 prep — 2026-09-21
+
+### Done
+- Crate metadata: keywords (midi/midi2/midi-ci/ump/+crate-specific), categories,
+  readme, homepage/documentation links; LICENSE copied into each publishable
+  crate; `[package.metadata.docs.rs] all-features` on `midici-pe`.
+- Path deps carry `version = "0.1.0"` (required by cargo publish).
+- `midici-responder` no longer a placeholder (rule 11): re-exports the complete
+  façade from `midici-pe`, with a constructible-through-façade test.
+- `release-plz.toml`: workspace config; `midici-conformance`/examples excluded
+  (`registry_publish=false`); publish order topo-inferred
+  (core → pe → responder → alsa → clap).
+- `.github/workflows/release.yml`: on `v*` tags — build `virtual-responder`
+  (x86_64-unknown-linux-gnu) + SHA256SUMS + GitHub release with the CHANGELOG
+  section for the tag; rc tags → draft prerelease; final tags also run
+  release-plz `publish-crates` (secret `CARGO_REGISTRY_TOKEN` = Scott's; G10).
+- `docs/ANNOUNCE.md`: checklist (crates.io/docs.rs live links, midi2.dev
+  submission), r/rust + KVR + LinkedIn drafts, yank/tag-revert rollback.
+- git-config fix worth noting: repo-local `core.autocrlf = true` so WSL git and
+  Git-for-Windows agree on file state over the shared tree (without it, WSL
+  git/cargo see CRLF-vs-index diffs as "dirty").
+
+### DoD outputs (verbatim, WSL Ubuntu)
+```text
+cargo publish -p midici-core --dry-run
+    Compiling midici-core v0.1.0 (…/package/midici-core-0.1.0)
+    Finished `dev` profile …  /  Uploading midici-core v0.1.0
+warning: aborting upload due to dry run
+cargo publish -p midici-transport-clap --dry-run
+    Verifying midici-transport-clap v0.1.0
+    Finished … / Uploading midici-transport-clap v0.1.0
+warning: aborting upload due to dry run
+cargo publish -p midici-pe / midici-responder / midici-transport-alsa --dry-run
+    error: no matching package named `midici-core` found (crates.io index)
+    → expected until midici-core 0.1.0 is actually published; release-plz
+      publishes in dependency order and retries the dependents.
+cargo build -p virtual-responder --release → Finished `release` profile
+gates: fmt OK · clippy -D warnings OK · 23/23 test suites OK · cargo deny OK
+```
+
+### Open items
+- G10: Scott pushes `v0.1.0-rc1` (created locally), checks the release
+  workflow run, then tags/pushes `v0.1.0` for the final publish.
+- midi2.dev submission URL TBD (Scott owns the account).
+
+### Tag
+- `phase-10-complete`, and local `v0.1.0-rc1` (not pushed).

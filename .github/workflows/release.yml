@@ -1,0 +1,66 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"] # v0.1.0, v0.1.0-rc1, …
+
+permissions:
+  contents: write
+
+jobs:
+  build-virtual-responder:
+    name: build virtual-responder (x86_64-unknown-linux-gnu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+      - name: Install ALSA dev package
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build -p virtual-responder --release --locked
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          cp target/release/virtual-responder dist/virtual-responder-x86_64-unknown-linux-gnu
+          cd dist && sha256sum * > SHA256SUMS.txt
+
+      - name: Extract CHANGELOG section for this tag
+        id: notes
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          python3 - "$ver" <<'PY' > release_notes.md
+          import re, sys
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"## \[{re.escape(sys.argv[1])}\](.*?)(?=\n## \[|\Z)", text, re.S)
+          print(m.group(1).strip() if m else "See CHANGELOG.md")
+          PY
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
+          draft: ${{ contains(github.ref_name, '-rc') }}
+          body_path: release_notes.md
+          files: |
+            dist/*
+
+  publish-crates:
+    name: crates.io publish (release-plz)
+    runs-on: ubuntu-latest
+    # Only for the final vX.Y.Z tag (no -rc suffixes).
+    if: ${{ !contains(github.ref_name, '-') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # HUMAN GATE G10: CARGO_REGISTRY_TOKEN is owned by Scott; the job runs
+      # `release-plz release` in dependency order (release-plz.toml).
+      - name: Install release-plz
+        uses: taiki-e/install-action@release-plz
+      - name: Run release-plz
+        run: release-plz release --allow-dirty=false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
