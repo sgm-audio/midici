@@ -32,12 +32,25 @@ jobs:
         id: notes
         run: |
           ver="${GITHUB_REF_NAME#v}"
-          python3 - "$ver" <<'PY' > release_notes.md
-          import re, sys
-          text = open("CHANGELOG.md", encoding="utf-8").read()
-          m = re.search(rf"## \[{re.escape(sys.argv[1])}\](.*?)(?=\n## \[|\Z)", text, re.S)
-          print(m.group(1).strip() if m else "See CHANGELOG.md")
-          PY
+          base="${ver%%-*}"
+          awk -v v="$ver" '
+            $0 ~ "^## \\[" v "\\]" { p=1; print; next }
+            p && $0 ~ "^## \\[" { exit }
+            p
+          ' CHANGELOG.md > release_notes.md || true
+          if [ ! -s release_notes.md ]; then
+            awk -v v="$base" '
+              $0 ~ "^## \\[" v "\\]" { p=1; print; next }
+              p && $0 ~ "^## \\[" { exit }
+              p
+            ' CHANGELOG.md > release_notes.md || true
+          fi
+          [ -s release_notes.md ] || awk '
+            $0 ~ "^## \[Unreleased\]" { p=1; print; next }
+            p && $0 ~ "^## \[" { exit }
+            p
+          ' CHANGELOG.md > release_notes.md || true
+          [ -s release_notes.md ] || echo "See CHANGELOG.md" > release_notes.md
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
