@@ -14,11 +14,11 @@ jobs:
     container: ubuntu:26.04 # alsa-lib >= 1.2.13 (UMP *_set_* symbols)
     steps:
       - uses: actions/checkout@v4
+      - name: Install build deps + ALSA dev package
+        run: apt-get update && apt-get install -y libasound2-dev pkg-config build-essential curl
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.97.1"
-      - name: Install ALSA dev package
-        run: apt-get update && apt-get install -y libasound2-dev pkg-config build-essential curl
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build -p virtual-responder --release --locked
