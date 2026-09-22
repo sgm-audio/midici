@@ -1074,3 +1074,18 @@ gates: fmt OK · clippy -D warnings OK · 23/23 test suites OK · cargo deny OK
 
 ### Tag
 - `phase-10-complete`, and local `v0.1.0-rc1` (not pushed).
+
+### Phase 10 follow-up — push + CI bring-up — 2026-09-22
+- Pushed main + phase tags; `v0.1.0-rc1` pushed twice (multi-tag push dropped the
+  tag event the first time — re-push individual tags).
+- CI fixes discovered only by running GitHub Actions:
+  1. ci.yml clippy/test/doc needed `libasound2-dev pkg-config` (alsa-sys).
+  2. alsa-lib `snd_ump_*_set_*` symbols are ALSA_1.2.13-versioned; noble has
+     1.2.11 → clippy/test/doc + release build moved into `ubuntu:26.04`
+     containers.
+  3. Container image lacks `curl` (order) and `python3` (CHANGELOG extraction
+     now awk).
+- Release workflow green on `v0.1.0-rc1`: draft prerelease with
+  `virtual-responder-x86_64-unknown-linux-gnu` + `SHA256SUMS.txt` + the
+  0.1.0 CHANGELOG section as notes.
+- DoD "release workflow green on a -rc tag": PASSED (run 35685603117).
