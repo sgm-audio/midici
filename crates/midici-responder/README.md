@@ -1,14 +1,32 @@
 # midici-responder
 
-Reserved for the Phase-8 ergonomic façade (timers, ring pairings, event pump) on top of the sans-io engines.
+Ergonomic MIDI-CI responder façade: the application-facing entry point.
 
-## Today
+## For 0.1.0
 
-The complete responder already lives in **`midici_pe::ResponderEngine`** — that
-is the type transports drive. This crate currently exposes only package
-identity (`VERSION`, `CRATE_NAME`) and will gain the façade (poll-loop helper,
-bounded ring wiring, logging hooks) in a later phase.
+This crate re-exports the complete responder engine and its resource API
+(`ResponderEngine`, `ResourceRegistry`, `PropertyResource`, `NotifyBody`,
+`PeEvent`, …) from `midici-pe`, so applications depend on one crate.
 
-- Use `midici_pe::ResponderEngine` for engine composition.
-- Use `midici-transport-alsa` (virtual endpoint + 10 ms control loop) or
-  `midici-transport-clap` (RT ring) for ready-made glue.
+```rust
+use midici_responder::{ResponderEngine, ResourceRegistry};
+use midici_core::{CiConfig, DeviceIdentity};
+
+let cfg = CiConfig::responder_default(identity);
+let registry = ResourceRegistry::with_device_info(identity);
+let mut engine = ResponderEngine::new(cfg, rng, registry);
+
+loop {
+    // control thread at ~10 ms
+    engine.poll(now_ms);
+    while let Some(out) = engine.next_outbound() { /* send */ }
+    while let Some(ev) = engine.next_event() { /* management */ }
+    while let Some(ev) = engine.next_pe_event() { /* PE set/subscribe */ }
+}
+```
+
+Transport-agnostic event-pump helpers (ring pairings, logging hooks) land next.
+
+## Dependencies
+
+- `midici-core`, `midici-pe`

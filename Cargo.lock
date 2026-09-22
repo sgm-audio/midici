@@ -427,6 +427,11 @@ dependencies = [
 [[package]]
 name = "midici-responder"
 version = "0.1.0"
+dependencies = [
+ "midici-core",
+ "midici-pe",
+ "rand_core 0.6.4",
+]
 
 [[package]]
 name = "midici-transport-alsa"
