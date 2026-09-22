@@ -11,13 +11,14 @@ jobs:
   build-virtual-responder:
     name: build virtual-responder (x86_64-unknown-linux-gnu)
     runs-on: ubuntu-latest
+    container: ubuntu:26.04 # alsa-lib >= 1.2.13 (UMP *_set_* symbols)
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.97.1"
       - name: Install ALSA dev package
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+        run: apt-get update && apt-get install -y libasound2-dev pkg-config build-essential curl
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build -p virtual-responder --release --locked
