@@ -1089,3 +1089,16 @@ gates: fmt OK · clippy -D warnings OK · 23/23 test suites OK · cargo deny OK
   `virtual-responder-x86_64-unknown-linux-gnu` + `SHA256SUMS.txt` + the
   0.1.0 CHANGELOG section as notes.
 - DoD "release workflow green on a -rc tag": PASSED (run 35685603117).
+
+### Phase 10 follow-up — release bring-up (2026-09-23)
+- Pinned 3rd-party actions to tag SHAs (lychee-action v2.9.0, action-gh-release
+  v3.0.3, taiki-e/install-action) — clears dependabot alert #1 (lychee composite
+  injection).
+- Fixed `release-plz` invocation + `release-plz.toml` keys; validated locally
+  (`release-plz release --dry-run` — config parses, topo publish order spawns
+  midici-core first).
+- Publish job now skips gracefully (notice) until `CARGO_REGISTRY_TOKEN` exists.
+- **v0.1.0 tagged & pushed; GitHub release published with
+  `virtual-responder-x86_64-unknown-linux-gnu` + `SHA256SUMS.txt`.**
+  Crates.io publish pending the token (G10) — rerun the release workflow after
+  adding the secret.
