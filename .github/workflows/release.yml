@@ -74,7 +74,7 @@ jobs:
       - name: Install release-plz (pinned to a tag SHA)
         uses: taiki-e/install-action@96a746fdd011c22df180a2178431966697e1f73e # install-action@release-plz
       - name: Run release-plz
-        run: release-plz release --allow-dirty=false
+        run: release-plz release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
