@@ -51,8 +51,8 @@ jobs:
             p
           ' CHANGELOG.md > release_notes.md || true
           [ -s release_notes.md ] || echo "See CHANGELOG.md" > release_notes.md
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+      - name: Create GitHub release (pinned to a tag SHA)
+        uses: softprops/action-gh-release@e598afbe1493e6b1bafb1f389cabb956eab91231 # v3.0.3
         with:
           prerelease: ${{ contains(github.ref_name, '-rc') }}
           draft: ${{ contains(github.ref_name, '-rc') }}
@@ -71,8 +71,8 @@ jobs:
           fetch-depth: 0
       # HUMAN GATE G10: CARGO_REGISTRY_TOKEN is owned by Scott; the job runs
       # `release-plz release` in dependency order (release-plz.toml).
-      - name: Install release-plz
-        uses: taiki-e/install-action@release-plz
+      - name: Install release-plz (pinned to a tag SHA)
+        uses: taiki-e/install-action@96a746fdd011c22df180a2178431966697e1f73e # install-action@release-plz
       - name: Run release-plz
         run: release-plz release --allow-dirty=false
         env:

@@ -82,7 +82,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: lycheeverse/lychee-action@v1
+      - name: lychee link check (pinned to a tag SHA — CVE-safe)
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           args: "--verbose --no-progress README.md docs/guide/ CHANGELOG.md"
           fail: true
