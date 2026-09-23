@@ -10,18 +10,18 @@ changelog_update = true
 dependencies_update = true
 semver_check = false # 0.1.0 initial publish; enable after the first public release
 
-# Harness + examples are never published.
+# Harness + examples are never published/released.
 [[package]]
 name = "midici-conformance"
-registry_publish = false
+publish = false
 release = false
 
 [[package]]
 name = "virtual-responder"
-registry_publish = false
+publish = false
 release = false
 
 [[package]]
 name = "clap-autoprop"
-registry_publish = false
+publish = false
 release = false
