@@ -7,6 +7,22 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["midi", "midi2", "midi-ci", "ump", "alsa"]
+categories = ["multimedia::audio"]
+readme = "README.md"
+
+[features]
+default = []
+# Live sequencer tests (requires /dev/snd/seq). Off by default in CI.
+alsa-live = []
+
+[dependencies]
+alsa-sys = "0.6"
+libc = "0.2"
+midi2 = { version = "0.11", default-features = false, features = ["std", "sysex7"] }
+midici-core = { path = "../midici-core", version = "0.1.0" }
+midici-pe = { path = "../midici-pe", version = "0.1.0" }
+rand = "0.8"
 
 [lints]
 workspace = true

@@ -10,7 +10,16 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
+midici-core = { path = "../../crates/midici-core" }
+midici-pe = { path = "../../crates/midici-pe" }
 midici-responder = { path = "../../crates/midici-responder" }
+midici-transport-alsa = { path = "../../crates/midici-transport-alsa" }
+rand = "0.8"
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

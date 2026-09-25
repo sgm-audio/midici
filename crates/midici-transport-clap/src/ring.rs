@@ -3,6 +3,28 @@
 //! Two unidirectional rings (inbound, outbound) carry SysEx byte chunks
 //! between the audio thread and the control thread.
 //!
+//! Consumption is two-phase — [`Consumer::peek`] returns a slice into the
+//! slot, [`Consumer::commit`] publishes it as consumed — so the producer can
+//! never overwrite bytes the reader is still using (miri-verified).
+//!
+//! ## Example
+//!
+//! ```
+//! use midici_transport_clap::{Consumer, Producer, Ring};
+//!
+//! let ring: Ring<4, 64> = Ring::new();
+//! // SAFETY: this thread owns both sides for the demo; in production each
+//! // half is owned by exactly one thread (SPSC).
+//! let mut prod = unsafe { Producer::new(&ring) };
+//! let mut cons = unsafe { Consumer::new(&ring) };
+//!
+//! assert!(prod.push(b"hello")); // whole slot is written, zero-padded
+//! let slot = cons.peek().unwrap();
+//! assert_eq!(&slot[..5], b"hello");
+//! cons.commit(); // publish as consumed — only now may the producer reuse it
+//! assert!(cons.peek().is_none());
+//! ```
+//!
 //! ## Geometry
 //!
 //! Const-generic: `N` slots of `B` bytes each. Default is 64 × 512 B
@@ -41,9 +63,13 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 ///
 /// `N` slots, each `B` bytes. The ring stores raw byte chunks — no
 /// serialization, no parsing.
+#[derive(Debug)]
 pub struct Ring<const N: usize, const B: usize> {
-    /// Flat buffer: `N * B` bytes for all slots.
-    buf: UnsafeCell<MaybeUninit<[u8; N * B]>>,
+    /// Flat buffer: `N` slots of `B` bytes, stored as nested arrays.
+    ///
+    /// `[u8; N * B]` needs nightly `generic_const_exprs`; `[[u8; B]; N]`
+    /// is layout-identical and stable.
+    buf: UnsafeCell<MaybeUninit<[[u8; B]; N]>>,
     /// Next write slot index (producer advances).
     write_idx: AtomicUsize,
     /// Next read slot index (consumer advances).
@@ -98,12 +124,19 @@ impl<const N: usize, const B: usize> Ring<N, B> {
     }
 }
 
+impl<const N: usize, const B: usize> Default for Ring<N, B> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Producer half: writes into the ring (RT audio thread for inbound,
 /// control thread for outbound).
 ///
 /// # Safety
 ///
 /// Only one producer may exist per ring at a time.
+#[derive(Debug)]
 pub struct Producer<'a, const N: usize, const B: usize> {
     ring: &'a Ring<N, B>,
     /// Cached write index for the fast path.
@@ -181,9 +214,7 @@ impl<'a, const N: usize, const B: usize> Producer<'a, N, B> {
     /// Number of pending slots from the producer's cached view.
     #[inline]
     pub fn pending(&self) -> usize {
-        self.cached_write
-            .wrapping_sub(self.cached_read)
-            .min(N)
+        self.cached_write.wrapping_sub(self.cached_read).min(N)
     }
 }
 
@@ -193,6 +224,7 @@ impl<'a, const N: usize, const B: usize> Producer<'a, N, B> {
 /// # Safety
 ///
 /// Only one consumer may exist per ring at a time.
+#[derive(Debug)]
 pub struct Consumer<'a, const N: usize, const B: usize> {
     ring: &'a Ring<N, B>,
     /// Cached read index for the fast path.
@@ -218,11 +250,15 @@ impl<'a, const N: usize, const B: usize> Consumer<'a, N, B> {
         }
     }
 
-    /// Try to pop one slot. Returns `Some(&[u8])` on success (the
-    /// slice length is always `B`; the consumer uses framing to
+    /// Look at the next slot without consuming it. Returns `Some(&[u8])` on
+    /// success (the slice length is always `B`; the caller uses framing to
     /// determine the actual payload length). Returns `None` if empty.
+    ///
+    /// The returned slice stays valid until [`Self::commit`]: the slot is
+    /// published as consumed only by `commit`, so the producer can never
+    /// overwrite data the reader is still looking at.
     #[inline]
-    pub fn pop(&mut self) -> Option<&[u8]> {
+    pub fn peek(&mut self) -> Option<&[u8]> {
         if self.cached_read == self.cached_write {
             // Refresh cached write index.
             self.cached_write = self.ring.write_idx.load(Ordering::Acquire);
@@ -233,26 +269,41 @@ impl<'a, const N: usize, const B: usize> Consumer<'a, N, B> {
 
         let offset = (self.cached_read % N) * B;
         let buf_ptr = self.ring.buf.get() as *const u8;
-        // SAFETY: consumer has exclusive read access; producer won't
-        // overwrite this slot until read_idx advances past it.
-        let data: &[u8] =
-            unsafe { core::slice::from_raw_parts(buf_ptr.add(offset), B) };
+        // SAFETY: the producer cannot write this slot while read_idx still
+        // points at it (a full ring has N pending; this slot is not yet
+        // committed, so it still counts as pending).
+        let data: &[u8] = unsafe { core::slice::from_raw_parts(buf_ptr.add(offset), B) };
+        Some(data)
+    }
 
-        // Advance.
+    /// Consume the slot named by the last [`Self::peek`]. Publishes the read
+    /// index so the producer may reuse the slot. Call only after the data
+    /// from `peek` has been fully used (copied out / forwarded).
+    #[inline]
+    pub fn commit(&mut self) {
         self.cached_read = self.cached_read.wrapping_add(1);
         self.ring
             .read_idx
             .store(self.cached_read, Ordering::Release);
+    }
 
-        Some(data)
+    /// Convenience: peek + copy to `out` + commit. Returns `true` on success.
+    #[inline]
+    pub fn pop_into(&mut self, out: &mut [u8; B]) -> bool {
+        match self.peek() {
+            None => false,
+            Some(data) => {
+                out.copy_from_slice(data);
+                self.commit();
+                true
+            }
+        }
     }
 
     /// Number of pending slots from the consumer's cached view.
     #[inline]
     pub fn pending(&self) -> usize {
-        self.cached_write
-            .wrapping_sub(self.cached_read)
-            .min(N)
+        self.cached_write.wrapping_sub(self.cached_read).min(N)
     }
 }
 
@@ -282,11 +333,12 @@ mod tests {
         assert!(prod.push(&data));
         assert_eq!(prod.pending(), 1);
 
-        let popped = cons.pop().unwrap();
+        let popped = cons.peek().unwrap();
         assert_eq!(&popped[..16], &data[..]);
         // Trailing bytes zeroed.
         assert!(popped[16..].iter().all(|&b| b == 0));
-        assert!(cons.pop().is_none());
+        cons.commit();
+        assert!(cons.peek().is_none());
     }
 
     #[test]
@@ -301,11 +353,12 @@ mod tests {
         }
 
         for i in 0u8..64 {
-            let popped = cons.pop().unwrap();
+            let popped = cons.peek().unwrap();
             assert_eq!(popped[0], i);
             assert_eq!(&popped[..128], &[i; 128]);
+            cons.commit();
         }
-        assert!(cons.pop().is_none());
+        assert!(cons.peek().is_none());
     }
 
     #[test]
@@ -353,16 +406,19 @@ mod tests {
         assert!(prod.push(b"world"));
         assert!(!prod.push(b"full"));
 
-        let p1 = cons.pop().unwrap();
+        let p1 = cons.peek().unwrap();
         assert_eq!(&p1[..5], b"hello");
+        cons.commit();
         // Now one slot free.
         assert!(prod.push(b"again"));
 
-        let p2 = cons.pop().unwrap();
+        let p2 = cons.peek().unwrap();
         assert_eq!(&p2[..5], b"world");
-        let p3 = cons.pop().unwrap();
+        cons.commit();
+        let p3 = cons.peek().unwrap();
         assert_eq!(&p3[..5], b"again");
-        assert!(cons.pop().is_none());
+        cons.commit();
+        assert!(cons.peek().is_none());
     }
 
     #[test]
@@ -374,8 +430,9 @@ mod tests {
 
         let data = [0x7F; 200];
         assert!(prod.push(&data));
-        let popped = cons.pop().unwrap();
+        let popped = cons.peek().unwrap();
         assert_eq!(&popped[..200], &data[..]);
+        cons.commit();
     }
 
     /// Overflow with every slot-size from 1..B, ensure drop counter correct.
@@ -402,21 +459,25 @@ mod tests {
         let mut prod = unsafe { Producer::new(&ring) };
         let mut cons = unsafe { Consumer::new(&ring) };
 
-        // Push 100 items through a 4-slot ring.
+        // Push 100 items through a 4-slot ring; every popped value must be
+        // the next one in sequence (FIFO order preserved across wrap).
+        let mut next = 0u8;
         for i in 0u8..100 {
             let data = [i; 32];
             while !prod.push(&data) {
-                // Drain one.
-                cons.pop();
+                let popped = cons.peek().expect("full ring must pop a slot");
+                assert_eq!(popped[0], next);
+                cons.commit();
+                next += 1;
             }
         }
         // Drain remaining.
-        let mut last = 0u8;
-        while let Some(data) = cons.pop() {
-            assert_eq!(data[0], last);
-            last += 1;
+        while let Some(data) = cons.peek() {
+            assert_eq!(data[0], next);
+            next += 1;
+            cons.commit();
         }
-        assert_eq!(last, 100);
+        assert_eq!(next, 100);
     }
 }
 
@@ -453,9 +514,10 @@ mod miri_tests {
             let mut cons = unsafe { Consumer::new(&r_cons) };
             let mut count = 0u8;
             while count < 100 {
-                if let Some(data) = cons.pop() {
+                if let Some(data) = cons.peek() {
                     assert_eq!(data[0], count);
                     count += 1;
+                    cons.commit();
                 } else {
                     thread::yield_now();
                 }
@@ -492,9 +554,10 @@ mod miri_tests {
         {
             let mut cons = unsafe { Consumer::new(&r_cons) };
             for _ in 0..4 {
-                assert!(cons.pop().is_some());
+                assert!(cons.peek().is_some());
+                cons.commit();
             }
-            assert!(cons.pop().is_none());
+            assert!(cons.peek().is_none());
         }
     }
 }

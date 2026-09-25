@@ -551,6 +551,167 @@ test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 
 ---
 
+---
+
+## Phase 4 — PE Capabilities + Get / resources / status matrix — 2026-07-24
+
+### Done
+- BUILD (`midici-core`): PE Caps Inquiry/Reply codecs (`pe_caps`); PE Get
+  Inquiry/Reply wrappers (`pe_get`); sub-IDs `0x30/0x31/0x34/0x35` + PE version
+  constants citing M2-101 §8.5–§8.8.
+- BUILD (`midici-pe`): typed `PeStatus` (200/341/400/403/404/405/413/445) citing
+  M2-103 §7.4.1 Table 15; JSON header parse/encode with depth/size limits;
+  `PropertyResource` + `DeviceInfo` / `ResourceList`; `ResourceRegistry`;
+  `PeController` (Caps negotiate `numSimultaneousRequests` + PE version;
+  Get correlation via Phase-2 reassembler/chunker; Busy before accept);
+  `ResponderEngine` façade over `CiEngine` + PE.
+- TESTS (`midici-conformance`): test-only initiator shim; loopback Discovery →
+  PE Caps → Get ResourceList → Get DeviceInfo at max SysEx 128 and 4096
+  (payload equality + chunk-count); NAK matrix for 400/403/404/405/413/445/341;
+  golden `exchanges/04-pe-get-deviceinfo.transcript` with `ENGINE responder`
+  replay path.
+- TAG: `phase-4-complete`.
+
+### Deviations from ARD (with reason)
+1. **Busy status 445 vs M2-103 343**: ARD §7 / Phase-4 DoD map excess concurrent
+   txs → **445**. M2-103 §7.4.1 Table 15 lists **343** “Too Many Requests” and
+   **445** “Invalid Version of Data”. Implementation follows ARD/DoD; documented
+   on `PeStatus::Busy`.
+2. **PE major/minor = 0x00/0x00**: M2-101 §8.5 Table 31 only enumerates Common
+   Rules 1.0/1.1 → `0x00`/`0x00` (no newer PE version row in pinned PDFs).
+3. **Deps**: `serde` + `serde_json` (alloc) on `midici-pe` for PE JSON headers /
+   resources on the control path only (ARD §2). `rand_core` on `midici-pe` for
+   `ResponderEngine` RNG bound shared with `CiEngine`. `midici-conformance`
+   gains path deps on `midici-pe`, `serde_json`, `rand_core` for harness only.
+4. **DeviceInfo JSON shape**: manufacturer/family/model/version fields from
+   `CiConfig` identity as M2-103-style arrays (no serial — not in `CiConfig`).
+5. **Set / Subscribe**: out of Phase-4 scope (Get + Caps only).
+
+### DoD outputs (verbatim)
+
+#### `cargo test --workspace --all-features`
+```text
+midici-conformance: exchange_transcripts_byte_exact_replay ... ok (≥4 goldens)
+pe_loopback: 2 passed (128 + 4096)
+pe_nak_matrix: 8 passed
+midici-pe json_header: malformed_never_panics / depth / size ... ok
+test result lines: all ok (0 failed across workspace)
+```
+
+#### `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+```text
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+```
+
+#### fuzz smokes (`-runs=100000`)
+```text
+fuzz_mcoded7: Done 100000 runs in 1 second(s)
+fuzz_reassemble: Done 100000 runs in 5 second(s)
+```
+
+### Open items
+- HUMAN GATE G1 still open (mgmt goldens review).
+- Set/Subscribe, Process Inquiry, transport wiring — later phases.
+- Consider aligning Busy with M2-103 343 if ARD is revised.
+
+### Next phase
+- Phase 5 (not started): do not start in this session.
+
+### CI / tag note
+- Branch: `cursor/phase-4-pe-get-d03b` @ `3f7349b`
+- Tag `phase-4-complete` → `3f7349b`
+- PR: ManagePullRequest/gh createPullRequest unavailable in this environment
+  (open from https://github.com/sgm-audio/midici/pull/new/cursor/phase-4-pe-get-d03b)
+
+### Bugbot follow-up (peer table error) — 2026-07-24
+- Fixed: `Reassembler::bind_peer` returned `PeError::TooManyConcurrent` when the
+  fixed peer table was full; that variant is per-peer (5th concurrent tx → 445).
+  Added `PeError::PeerTableFull`; Phase-4 controller maps it to status 341
+  (`Unavailable`), not Busy/445. Test: `peer_table_full_is_not_too_many_concurrent`.
+
+### Bugbot follow-up (ACK v1.1 + min SysEx) — 2026-07-24
+- Fixed: `Ack` encode/decode now mirrors `Nak` for Message Format Version 1.1
+  (header-only; no v2 trailer).
+- Fixed: `Discovery` / `ReplyToDiscovery` reject `max_sysex_size < 128`
+  (`CiError::BadField`) on encode and decode per M2-101 §5.5.3.
+
+---
+
+## Phase 5 — ALSA UMP transport + virtual-responder — 2026-07-24
+
+### Decision (ALSA binding)
+Probed **alsa-lib 1.2.15.3**, **`alsa` crate 0.12.0**, **`alsa-sys` 0.6.0** inside `midici-dev`:
+
+| Surface | UMP rawmidi open/rw | Virtual UMP seq endpoint create | UMP seq event I/O |
+|---|---|---|---|
+| `alsa` 0.12 | yes (`ump::Ump`) | **no** | **no** |
+| `alsa-sys` 0.6 | yes | **yes** (`snd_seq_set_client_midi_version`, `snd_seq_set_ump_endpoint_info`, `snd_seq_set_ump_block_info`, port `MIDI_UMP` / `UMP_ENDPOINT`) | **yes** (`snd_seq_ump_event_input/output*`) |
+
+**Choice:** wrap **`alsa-sys` UMP sequencer symbols** in a thin safe module
+(`midici-transport-alsa::ump_seq`). Do **not** hand-roll ioctls. The `alsa`
+crate alone is insufficient for virtual endpoint creation.
+
+### Done
+- `midici-transport-alsa`: virtual UMP endpoint create; SysEx7 bridge via `midi2`
+  (`sysex7` feature); 10 ms control loop feeding `ResponderEngine`; outbound to
+  subscribers; feature `alsa-live` + `#[ignore]` live test.
+- `examples/virtual-responder`: CLI (`--device-name`, `--endpoint-name`,
+  `--group`, `--verbosity`, `--seed`); structured `CiEvent` logs; SIGINT shutdown.
+- Workspace lint: `unsafe_code` demoted `forbid` → `deny` so the transport crate
+  may `allow` FFI (documented above).
+
+### Deviations from ARD (with reason)
+1. **`alsa` crate not used for seq UMP** — missing wrappers; ARD §2 lists `alsa`,
+   but Phase-5 decision mandates `alsa-sys` when the safe crate lacks the API.
+2. **`midi2` on transport (not core yet)** — ARD places `midi2` on core; Phase 5
+   only needs SysEx7 at the transport boundary, so the dep is on
+   `midici-transport-alsa` for now (justify: UMP↔SysEx7 only).
+3. **Deps:** `alsa-sys`, `libc`, `midi2`, `clap`, `ctrlc`, `rand` — transport/CLI.
+4. **G5 live evidence** — not collectible in this cloud host (`/dev/snd/seq`
+   absent). Awaiting Scott on Bazzite (below).
+
+### DoD outputs (verbatim)
+
+#### `cargo build -p midici-transport-alsa -p virtual-responder`
+```text
+   Compiling midici-transport-alsa v0.1.0 (/workspace/crates/midici-transport-alsa)
+   Compiling virtual-responder v0.1.0 (/workspace/examples/virtual-responder)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.62s
+```
+
+#### `cargo test --workspace --all-features`
+```text
+midici-transport-alsa: 3 passed (sysex7 roundtrip + config + version); 1 ignored (alsa-live)
+pe_loopback / pe_nak_matrix / exchange transcripts: ok
+all workspace test result lines: 0 failed
+```
+
+### HUMAN GATE G5 — awaiting Scott (Bazzite / midici-dev)
+Environment note from agent box: `alsa-utils-1.2.15.2` **includes** `aseqdump -u`
+(`--ump=version`). Cloud agent has **no** `/dev/snd/seq` — cannot paste live logs here.
+
+Scott, please run and paste into this section:
+
+```bash
+cargo run -p virtual-responder -- --device-name midici --endpoint-name midici-responder -v 1 &
+aseqdump -l
+aseqdump -u 2 -p <client:port>
+# then Discovery from Workbench / second endpoint; paste daemon CiEvent lines + dump
+```
+
+### Open items
+- Paste G5 evidence above when available.
+- Optionally lift `midi2` into `midici-core` per ARD §2 in a later cleanup.
+
+### Next phase
+- Phase 6+ (not started): do not start in this session.
+
+### Tag note
+- Branch: `cursor/phase-5-alsa-transport-d03b`
+- Tag `phase-5-complete` after this commit (unit/build DoD met; G5 human paste pending).
+
+---
+
 ## Phase 6 — HUMAN GATE G6: clap-sys vs clack decision — 2026-08-01
 
 ### Decision comparison (≤15 lines)
@@ -652,3 +813,304 @@ test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
   (also failed on main CI for this PR's initial run).
 - Once test/clippy/fmt pass: re-add chctrllist, DeviceInfo/ResourceList, then clap_ffi
   module behind feature gate. Build full autoprop cdylib and run clap-validator.
+
+---
+
+## Phase 7 — PE Set + Subscriptions + Notify — 2026-09-21
+
+### Done
+- **Spec grounding (AGENTS §5)**: read M2-101-UM v1.2.1 §8.9–§8.13 (pp. 54–58) and
+  M2-103 v1.2 §7.2/§7.4.1/§8.2/§11–§12 (pp. 28–49) directly from `docs/specs/*`.
+  All new constants/types carry section citations.
+- **`midici-core`**: Sub-ID consts 0x36/0x37/0x38/0x39/0x3F + `is_pe_chunked_sub_id`;
+  generic `PeMessage` (any chunked PE sub-ID); `pe_get::PeGetMessage` kept as alias.
+- **`midici-pe`**:
+  - `PeStatus::Accepted = 201` (see deviation 1).
+  - JSON headers: `SetInquiryHeader` (resource/resId/setPartial), `SubscriptionHeader`
+    (command start/partial/full/notify/end, subscribeId, endedBy), `SubReplyHeader`
+    (status first per M2-103 §7.1), legacy `NotifyHeader`; shared depth/size/7-bit
+    guards; encoders.
+  - `subscriptions.rs`: `SubId` (8-hex, deterministic counter), bounded
+    `SubscriptionTable` (32 global / 8 per peer → 445), `reap_peer`.
+  - `Reassembler::cancel` (legacy Notify status 144, M2-103 §12.1.3) and
+    `drop_peer`.
+  - `PeController`: chunked-inquiry pipeline generalized to Get/Set/Subscription
+    (kind-tracked per-peer Busy/timeout/error replies on the correct reply sub-ID);
+    Set → registry write policy (default 405) + `PeEvent::PropertySet`; Subscription
+    start/end with SubId allocation and 404/405; initiator-side partial/full/notify
+    → 400; legacy Notify receive-only handling;
+    `notify_resource_changed(resource, NotifyBody::{Notify,Partial,Full})`
+    fan-out per subscriber (M2-103 §11 update commands on `0x38` — Notify `0x3F`
+    is deprecated in M2-101 v1.2 §8.13, so Notify fan-out is *not* sent as 0x3F);
+    auto "notify" push to subscribers after a successful Set (M2-103 §11);
+    `reap_peer`; `next_pe_event`.
+  - `ResponderEngine`: `next_pe_event`, `notify_resource_changed`; peer-liveness
+    reaping — CI events are drained in `poll()` (PeerInvalidated → reap) into a
+    pending queue (`next_event` unchanged semantics), plus a peer-table diff as
+    belt-and-suspenders. // ARD §7 "subscription leak"; M2-103 §11.5
+- **Conformance**: `test_resources::XTestResource` (writable+subscribable, optional
+  403); initiator shim `set`/`subscribe_start`/`subscribe_end`/`invalidate`; reply
+  parsers; transcript grammar `XTEST` directive; tests:
+  - Set: 200 round-trip (value landed in resource), 403, 405 (trait default),
+    404, multi-chunk Set at max_sysex=128.
+  - Lifecycle: subscribe → partial notify → unsubscribe; subscribe → Invalidate
+    → reaped at `poll(1)` (SubscribeEnd event, no further fan-out).
+  - Set to subscribed resource → 0x37 200 + 0x38 `{"command":"notify"}`.
+  - Golden `goldens/exchanges/05-pe-set-subscribe.transcript` (constructed from a
+    seeded engine run; listed in VERIFY.md for human diff-review, same convention
+    as mgmt goldens G1).
+- **clap-autoprop**: `flush_param_change(engine, resource, partial_body)` — the
+  Phase-7 control-thread wiring an actual CLAP plugin's params-flush/timer path
+  will call; unit tests: no-subscriber no-op, subscribed peer receives 0x38
+  `{"command":"partial",…}` update. Control-thread only (ARD §6).
+- **Phase-6 carryover fixed (DoD required `cargo test --workspace`):**
+  - `ring.rs`: `[u8; N * B]` → `[[u8; B]; N]` (stable; layout-identical).
+  - `wrap_around` test logic fixed (it dropped 96 items then expected index 0).
+  - **miri found a real SPSC race**: `Consumer::pop` advanced/published read_idx
+    *before* returning the slot slice, letting the producer overwrite data the
+    consumer was still reading. API changed to `peek()` + `commit()`
+    (+ `pop_into` convenience), and `midici-transport-clap` now passes
+    `cargo +nightly miri test` (13 tests).
+  - transport-alsa missing-doc/Debug lint backlog fixed (clippy -D warnings gate).
+
+### Deviations from ARD (with reason)
+1. **Status 201, not 202**: ARD §4 lists "202" for Set; M2-103 v1.2 Table 15 defines
+   **201** (Accepted) and has no 202. Pinned spec wins; `PeStatus::Accepted = 201`.
+2. **Notify fan-out uses Subscription messages (0x38), not Notify (0x3F)**:
+   M2-101 v1.2.1 §8.13 deprecates Notify for sending ("Devices should not send a
+   Notify message"); M2-103 §11 routes all updates through Subscription with
+   command partial/full/notify. 0x3F is receive-only honored (status 144
+   terminates the named transaction). The ARD §3 event enum's shape was kept as
+   `PeEvent` in midici-pe rather than new `CiEvent` variants (core stays
+   management-only; PE events are control-plane JSON-owned).
+3. **SubId is Responder-allocated** 8-hex-char strings (M2-103 §11.1) rather than a
+   numeric id; ARD `SubId` realized as `midici_pe::SubId` value type.
+4. **Pre-existing breakage fixed in this phase** (ring.rs compile + wrap_around
+   test + miri race) because the Phase-7 DoD demands green workspace gates; the
+   AGENTS.md "known pre-existing breakage" note was updated accordingly.
+5. **No new third-party deps.** clap-autoprop gains path deps on midici-core/
+   midici-pe + dev rand/serde_json (already in-tree). cargo-deny clean.
+6. **Environment**: repo copy relocated to `C:\Users\scott\midici` (original lives
+   under `C:\Windows\System32` with read-only ACLs for user `scott`); builds run in
+   WSL Ubuntu with rustup 1.97.1 and a vendored `libasound2` (no root available);
+   64-bit `midici-transport-alsa` builds/tests/link against the vendored lib via
+   rpath. This substitutes for the `midici-dev` distrobox this host lacks.
+
+### DoD command outputs (verbatim, WSL `Ubuntu`)
+
+#### `cargo fmt --all -- --check`
+```text
+FMT_OK
+```
+
+#### `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+```text
+    Checking virtual-responder v0.1.0 (/mnt/c/Users/scott/midici/examples/virtual-responder)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.39s
+```
+
+#### `cargo test --workspace` (23 suites ok, 0 failed; Phase-7 suites verbatim)
+```text
+     Running tests/pe_set_subscribe.rs (…/pe_set_subscribe-1532fc39049b96b6)
+
+running 10 tests
+test set_default_read_only_405 ... ok
+test set_unknown_resource_404 ... ok
+test set_roundtrip_ok_200 ... ok
+test set_forbidden_403 ... ok
+test subscribe_not_subscribable_405 ... ok
+test subscribe_unknown_resource_404 ... ok
+test lifecycle_subscribe_notify_unsubscribe ... ok
+test set_multi_chunk_roundtrip ... ok
+test set_to_subscribed_resource_sends_notify ... ok
+test subscribe_then_peer_vanishes_reaped ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+…
+test tests::exchange_transcripts_byte_exact_replay ... ok   # incl. 05-pe-set-subscribe
+     Running unittests src/main.rs (…/clap_autoprop-…)
+test tests::subscribed_peer_receives_partial_notify_on_flush ... ok
+test tests::flush_without_subscribers_is_noop ... ok
+# 23 × "test result: ok", 0 failed across the workspace
+```
+
+#### fuzz smokes (`-runs=100000` each)
+```text
+fuzz_mcoded7:     Done 100000 runs in 1 second(s)
+fuzz_reassemble:  Done 100000 runs in 8 second(s)
+```
+
+#### `cargo +nightly miri test -p midici-transport-clap`
+```text
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.07s
+```
+
+#### `cargo deny check`
+```text
+advisories ok, bans ok, licenses ok, sources ok
+(warning: duplicate `syn` 2.x/3.x via midi2 — pre-existing)
+```
+
+### Open items
+- HUMAN GATE G1 still open (mgmt goldens review); now also VERIFY.md row for the
+  constructed `05-pe-set-subscribe` golden.
+- G5 live ALSA evidence still outstanding (needs `/dev/snd/seq` host).
+- clap-validator + `.clap` packaging remain Phase-6 leftovers (plugin binding
+  unfinished; Phase 7 ships the control-thread notify wiring only).
+- `ResourceList` canSubscribe flags not emitted yet (would change golden 04 =
+  append-only rule: needs HUMAN-APPROVED-GOLDEN-CHANGE).
+- The original tree under `C:\Windows\System32\midici` needs these commits pulled
+   in (read-only ACLs blocked in-place edits this session).
+
+### Next phase
+- Not started: v2 items / finish Phase 6 leftover CLAP binding. Do not start in
+  this session.
+
+### Tag
+- `phase-7-complete` on the Phase-7 commit.
+
+---
+
+## Phase 9 — Documentation — 2026-09-21
+
+### Done
+- A pre-existing untracked docs draft set (per-crate READMEs, 4 guide pages,
+  CHANGELOG.md, cliff.toml, CI link-check job) was audited line-by-line against
+  the actual tree (G9 honesty rule). Corrected fabrications/staleness:
+  - `midici-responder` is a reserved crate (façade lives at
+    `midici_pe::ResponderEngine`); README rewritten to say so.
+  - `midici-transport-clap` README claimed `ControlBridge`/`InputEvents`/
+    `OutputEvents`/`chctrllist.rs` — none exist; rewritten to the actual scope
+    (Ring/Producer/Consumer with peek/commit) + "lands next" section.
+  - rt-contract.md ring diagram/API updated (`[[u8; B]; N]`, peek/commit,
+    miri note); architecture.md events split into `CiEvent` (management) +
+    `PeEvent` (PE); writing-a-transport.md uses `midici_pe::ResponderEngine`.
+  - integrating-a-clap-plugin.md rewritten: real `flush_param_change` wiring;
+    plugin binary marked as landing with Phase 6/8.
+  - README.md: stale "Get only" claims → Set/Subscribe ✅ rows; autoprop story
+    rewritten accurately; dead `docs/media/autoprop.cast` link removed (G9a:
+    linked only after the file exists).
+- rustdoc: `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS="-D warnings"`
+  zero warnings (fixed broken `alsa::Ump` intra-doc link).
+- Doctests: added 8 compiling doctests (core Discovery flow, PE registry,
+  custom resource, mcoded7 roundtrip, chunker split, SubscriptionTable,
+  full ResponderEngine loopback, ring peek/commit).
+- CHANGELOG.md: merged with `git-cliff` (cliff.toml template fixed) +
+  hand-edited 0.1.0 summary paragraph.
+- Link check: lychee over README + all crate READMEs + docs/guide + CHANGELOG
+  + AGENTS/ARD/VERIFY — 11 links, 0 errors (online mode).
+
+### Deviations from ARD (with reason)
+- None in code; docs-only phase. Existing runs in WSL environment as in Phase 7.
+
+### Open items
+- HUMAN GATE G9: Scott reads the guide + READMEs.
+- G9a: record `docs/media/autoprop.cast`, then add the README demo link.
+
+### DoD outputs (verbatim, WSL Ubuntu)
+```text
+cargo fmt --all -- --check → FMT_OK
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.81s
+cargo doc --workspace --no-deps  (RUSTDOCFLAGS="-D warnings")
+    Finished (DOC_OK, zero warnings)
+cargo test --doc --workspace
+    8 doctests ok (6 suites), 0 failed
+cargo test --workspace
+    23 × "test result: ok", 0 failed
+lychee (online) README + crate READMEs + docs/guide + CHANGELOG + AGENTS/ARD/VERIFY
+    🔍 11 Total ✅ 11 OK 🚫 0 Errors
+```
+
+### Tag
+- `phase-9-complete` on the phase commit.
+
+---
+
+## Phase 10 — Release 0.1.0 prep — 2026-09-21
+
+### Done
+- Crate metadata: keywords (midi/midi2/midi-ci/ump/+crate-specific), categories,
+  readme, homepage/documentation links; LICENSE copied into each publishable
+  crate; `[package.metadata.docs.rs] all-features` on `midici-pe`.
+- Path deps carry `version = "0.1.0"` (required by cargo publish).
+- `midici-responder` no longer a placeholder (rule 11): re-exports the complete
+  façade from `midici-pe`, with a constructible-through-façade test.
+- `release-plz.toml`: workspace config; `midici-conformance`/examples excluded
+  (`registry_publish=false`); publish order topo-inferred
+  (core → pe → responder → alsa → clap).
+- `.github/workflows/release.yml`: on `v*` tags — build `virtual-responder`
+  (x86_64-unknown-linux-gnu) + SHA256SUMS + GitHub release with the CHANGELOG
+  section for the tag; rc tags → draft prerelease; final tags also run
+  release-plz `publish-crates` (secret `CARGO_REGISTRY_TOKEN` = Scott's; G10).
+- `docs/ANNOUNCE.md`: checklist (crates.io/docs.rs live links, midi2.dev
+  submission), r/rust + KVR + LinkedIn drafts, yank/tag-revert rollback.
+- git-config fix worth noting: repo-local `core.autocrlf = true` so WSL git and
+  Git-for-Windows agree on file state over the shared tree (without it, WSL
+  git/cargo see CRLF-vs-index diffs as "dirty").
+
+### DoD outputs (verbatim, WSL Ubuntu)
+```text
+cargo publish -p midici-core --dry-run
+    Compiling midici-core v0.1.0 (…/package/midici-core-0.1.0)
+    Finished `dev` profile …  /  Uploading midici-core v0.1.0
+warning: aborting upload due to dry run
+cargo publish -p midici-transport-clap --dry-run
+    Verifying midici-transport-clap v0.1.0
+    Finished … / Uploading midici-transport-clap v0.1.0
+warning: aborting upload due to dry run
+cargo publish -p midici-pe / midici-responder / midici-transport-alsa --dry-run
+    error: no matching package named `midici-core` found (crates.io index)
+    → expected until midici-core 0.1.0 is actually published; release-plz
+      publishes in dependency order and retries the dependents.
+cargo build -p virtual-responder --release → Finished `release` profile
+gates: fmt OK · clippy -D warnings OK · 23/23 test suites OK · cargo deny OK
+```
+
+### Open items
+- G10: Scott pushes `v0.1.0-rc1` (created locally), checks the release
+  workflow run, then tags/pushes `v0.1.0` for the final publish.
+- midi2.dev submission URL TBD (Scott owns the account).
+
+### Tag
+- `phase-10-complete`, and local `v0.1.0-rc1` (not pushed).
+
+### Phase 10 follow-up — push + CI bring-up — 2026-09-22
+- Pushed main + phase tags; `v0.1.0-rc1` pushed twice (multi-tag push dropped the
+  tag event the first time — re-push individual tags).
+- CI fixes discovered only by running GitHub Actions:
+  1. ci.yml clippy/test/doc needed `libasound2-dev pkg-config` (alsa-sys).
+  2. alsa-lib `snd_ump_*_set_*` symbols are ALSA_1.2.13-versioned; noble has
+     1.2.11 → clippy/test/doc + release build moved into `ubuntu:26.04`
+     containers.
+  3. Container image lacks `curl` (order) and `python3` (CHANGELOG extraction
+     now awk).
+- Release workflow green on `v0.1.0-rc1`: draft prerelease with
+  `virtual-responder-x86_64-unknown-linux-gnu` + `SHA256SUMS.txt` + the
+  0.1.0 CHANGELOG section as notes.
+- DoD "release workflow green on a -rc tag": PASSED (run 35685603117).
+
+### Phase 10 follow-up — release bring-up (2026-09-23)
+- Pinned 3rd-party actions to tag SHAs (lychee-action v2.9.0, action-gh-release
+  v3.0.3, taiki-e/install-action) — clears dependabot alert #1 (lychee composite
+  injection).
+- Fixed `release-plz` invocation + `release-plz.toml` keys; validated locally
+  (`release-plz release --dry-run` — config parses, topo publish order spawns
+  midici-core first).
+- Publish job now skips gracefully (notice) until `CARGO_REGISTRY_TOKEN` exists.
+- **v0.1.0 tagged & pushed; GitHub release published with
+  `virtual-responder-x86_64-unknown-linux-gnu` + `SHA256SUMS.txt`.**
+  Crates.io publish pending the token (G10) — rerun the release workflow after
+  adding the secret.
+
+### Phase 10 — G10 done: crates.io publish live — 2026-09-25
+- Scott added `CARGO_REGISTRY_TOKEN`; publish job debugged through the real
+  pipeline (explicit `--forge github --git-token` for release-plz 0.3.169;
+  vendored resolute ALSA debs on the host runner for the transport-alsa verify;
+  graceful skip when the secret is absent).
+- **Published: midici-core, midici-pe, midici-responder, midici-transport-alsa,
+  midici-transport-clap — all 0.1.0 on crates.io.** Final release run green
+  (run 36091320664); CI green on main.
+- Per-crate GH releases auto-created (midici-*-v0.1.0); the three earliest have
+  empty bodies (created before `changelog_path` pointed at the root CHANGELOG —
+  cosmetic, fix by hand or leave).

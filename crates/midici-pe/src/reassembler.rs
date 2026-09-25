@@ -18,6 +18,8 @@
 //! rejected with [`PeError::Oversize`] before writing. A fifth concurrent
 //! transaction for a peer is rejected with [`PeError::TooManyConcurrent`]
 //! (no eviction to make room — LRU applies to inactivity timeout reclaim).
+//! When `max_peers` rows are all bound with at least one active slot, a new
+//! peer is rejected with [`PeError::PeerTableFull`] (not busy/445).
 //!
 //! On [`ReassembleEvent::Timeout`] or successful completion the slot is cleared
 //! (`clear` sets lengths to 0) and returned to the free list; capacities remain
@@ -309,6 +311,36 @@ impl Reassembler {
         }))
     }
 
+    /// Cancel one in-flight transaction of `peer` (legacy Notify status 144).
+    /// Returns true when a slot was reclaimed. // M2-103 §12.1.3
+    pub fn cancel(&mut self, peer: Muid, request_id: u8) -> bool {
+        if let Some(p) = self.peers.iter_mut().find(|p| p.bound && p.muid == peer) {
+            for slot in &mut p.slots {
+                if slot.active && slot.request_id == request_id {
+                    slot.clear();
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Drop every in-flight transaction of a peer (peer vanished / Invalidate).
+    /// Returns the number of reclaimed slots. // ARD §7 / M2-103 §11.5
+    pub fn drop_peer(&mut self, peer: Muid) -> usize {
+        let mut n = 0;
+        if let Some(p) = self.peers.iter_mut().find(|p| p.bound && p.muid == peer) {
+            for slot in &mut p.slots {
+                if slot.active {
+                    slot.clear();
+                    n += 1;
+                }
+            }
+            p.bound = false;
+        }
+        n
+    }
+
     /// Drive inactivity timeouts. Call from the engine poll loop.
     pub fn poll(&mut self, now_ms: u64) -> Vec<ReassembleEvent> {
         let mut events = Vec::new();
@@ -351,7 +383,7 @@ impl Reassembler {
             self.peers[i].bound = true;
             return Ok(i);
         }
-        Err(PeError::TooManyConcurrent)
+        Err(PeError::PeerTableFull)
     }
 
     fn find_or_alloc_slot(

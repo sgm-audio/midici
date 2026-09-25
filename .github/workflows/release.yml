@@ -1,0 +1,116 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"] # v0.1.0, v0.1.0-rc1, …
+
+permissions:
+  contents: write
+
+jobs:
+  build-virtual-responder:
+    name: build virtual-responder (x86_64-unknown-linux-gnu)
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04 # alsa-lib >= 1.2.13 (UMP *_set_* symbols)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps + ALSA dev package
+        run: |
+          apt-get update && apt-get install -y libasound2-dev pkg-config build-essential curl git
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build -p virtual-responder --release --locked
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          cp target/release/virtual-responder dist/virtual-responder-x86_64-unknown-linux-gnu
+          cd dist && sha256sum * > SHA256SUMS.txt
+
+      - name: Extract CHANGELOG section for this tag
+        id: notes
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          base="${ver%%-*}"
+          awk -v v="$ver" '
+            $0 ~ "^## \\[" v "\\]" { p=1; print; next }
+            p && $0 ~ "^## \\[" { exit }
+            p
+          ' CHANGELOG.md > release_notes.md || true
+          if [ ! -s release_notes.md ]; then
+            awk -v v="$base" '
+              $0 ~ "^## \\[" v "\\]" { p=1; print; next }
+              p && $0 ~ "^## \\[" { exit }
+              p
+            ' CHANGELOG.md > release_notes.md || true
+          fi
+          [ -s release_notes.md ] || awk '
+            $0 ~ "^## \[Unreleased\]" { p=1; print; next }
+            p && $0 ~ "^## \[" { exit }
+            p
+          ' CHANGELOG.md > release_notes.md || true
+          [ -s release_notes.md ] || echo "See CHANGELOG.md" > release_notes.md
+      - name: Create GitHub release (pinned to a tag SHA)
+        uses: softprops/action-gh-release@e598afbe1493e6b1bafb1f389cabb956eab91231 # v3.0.3
+        with:
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
+          draft: ${{ contains(github.ref_name, '-rc') }}
+          body_path: release_notes.md
+          files: |
+            dist/*
+
+  publish-crates:
+    name: crates.io publish (release-plz)
+    runs-on: ubuntu-latest
+    # Only for the final vX.Y.Z tag (no -rc suffixes).
+    if: ${{ !contains(github.ref_name, '-') }}
+    env:
+      HAS_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
+    steps:
+      - name: Skip when CARGO_REGISTRY_TOKEN is not configured (G10)
+        if: env.HAS_REGISTRY_TOKEN != 'true'
+        run: |
+          echo "::notice::CARGO_REGISTRY_TOKEN not set — skipping crates.io publish (HUMAN GATE G10). Add the secret, then rerun this workflow or re-tag." >&2
+      - uses: actions/checkout@v4
+        if: env.HAS_REGISTRY_TOKEN == 'true'
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        if: env.HAS_REGISTRY_TOKEN == 'true'
+        with:
+          toolchain: "1.97.1"
+      # Noble's libasound2 (1.2.11) lacks the ALSA_1.2.13-versioned
+      # snd_ump_*_set_* symbols used by midici-transport-alsa; install
+      # resolute's 1.2.16.1 into the job user (no root needed for linkage tests).
+      - name: Install alsa-lib 1.2.16 (resolute debs)
+        if: env.HAS_REGISTRY_TOKEN == 'true'
+        run: |
+          set -e
+          mkdir -p ~/alsa16 && cd ~/alsa16
+          base=https://archive.ubuntu.com/ubuntu/pool/main/a/alsa-lib
+          curl -sSLO "$base/libasound2-dev_1.2.16.1-1_amd64.deb"
+          curl -sSLO "$base/libasound2t64_1.2.16.1-1_amd64.deb"
+          dpkg-deb -x libasound2t64_1.2.16.1-1_amd64.deb root
+          dpkg-deb -x libasound2-dev_1.2.16.1-1_amd64.deb root
+          ln -sf libasound.so.2 root/usr/lib/x86_64-linux-gnu/libasound.so
+          pc=root/usr/lib/x86_64-linux-gnu/pkgconfig/alsa.pc
+          sed -i "s|^prefix=/usr|prefix=$HOME/alsa16/root/usr|" "$pc"
+          {
+            echo "PKG_CONFIG_PATH=$HOME/alsa16/root/usr/lib/x86_64-linux-gnu/pkgconfig"
+            echo "LD_LIBRARY_PATH=$HOME/alsa16/root/usr/lib/x86_64-linux-gnu"
+            echo "RUSTFLAGS=-L $HOME/alsa16/root/usr/lib/x86_64-linux-gnu"
+          } >> "$GITHUB_ENV"
+      # HUMAN GATE G10: CARGO_REGISTRY_TOKEN is owned by Scott; the job runs
+      # `release-plz release` in dependency order (release-plz.toml).
+      - name: Install release-plz (pinned to a tag SHA)
+        if: env.HAS_REGISTRY_TOKEN == 'true'
+        uses: taiki-e/install-action@96a746fdd011c22df180a2178431966697e1f73e # install-action@release-plz
+      - name: Run release-plz
+        if: env.HAS_REGISTRY_TOKEN == 'true'
+        run: release-plz release --repo-url https://github.com/${{ github.repository }} --forge github --git-token "$GITHUB_TOKEN"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
