@@ -1,5 +1,9 @@
 # midici
 
+[![CI](https://github.com/sgm-audio/midici/actions/workflows/ci.yml/badge.svg)](https://github.com/sgm-audio/midici/actions/workflows/ci.yml)
+[![Rust](https://img.shields.io/badge/rust-stable-orange)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Rust MIDI-CI / Property Exchange responder stack — the control plane for MIDI 2.0.
 
 ## Quickstart (4 commands)
