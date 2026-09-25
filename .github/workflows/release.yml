@@ -63,6 +63,7 @@ jobs:
   publish-crates:
     name: crates.io publish (release-plz)
     runs-on: ubuntu-latest
+    container: ubuntu:26.04 # alsa-lib >= 1.2.13 for verify of midici-transport-alsa
     # Only for the final vX.Y.Z tag (no -rc suffixes).
     if: ${{ !contains(github.ref_name, '-') }}
     env:
@@ -76,6 +77,13 @@ jobs:
         if: env.HAS_REGISTRY_TOKEN == 'true'
         with:
           fetch-depth: 0
+      - name: Install build deps (incl. ALSA for transport-alsa verify)
+        if: env.HAS_REGISTRY_TOKEN == 'true'
+        run: apt-get update && apt-get install -y libasound2-dev pkg-config build-essential curl
+      - uses: dtolnay/rust-toolchain@master
+        if: env.HAS_REGISTRY_TOKEN == 'true'
+        with:
+          toolchain: "1.97.1"
       # HUMAN GATE G10: CARGO_REGISTRY_TOKEN is owned by Scott; the job runs
       # `release-plz release` in dependency order (release-plz.toml).
       - name: Install release-plz (pinned to a tag SHA)
