@@ -1102,3 +1102,15 @@ gates: fmt OK · clippy -D warnings OK · 23/23 test suites OK · cargo deny OK
   `virtual-responder-x86_64-unknown-linux-gnu` + `SHA256SUMS.txt`.**
   Crates.io publish pending the token (G10) — rerun the release workflow after
   adding the secret.
+
+### Phase 10 — G10 done: crates.io publish live — 2026-09-25
+- Scott added `CARGO_REGISTRY_TOKEN`; publish job debugged through the real
+  pipeline (explicit `--forge github --git-token` for release-plz 0.3.169;
+  vendored resolute ALSA debs on the host runner for the transport-alsa verify;
+  graceful skip when the secret is absent).
+- **Published: midici-core, midici-pe, midici-responder, midici-transport-alsa,
+  midici-transport-clap — all 0.1.0 on crates.io.** Final release run green
+  (run 36091320664); CI green on main.
+- Per-crate GH releases auto-created (midici-*-v0.1.0); the three earliest have
+  empty bodies (created before `changelog_path` pointed at the root CHANGELOG —
+  cosmetic, fix by hand or leave).
