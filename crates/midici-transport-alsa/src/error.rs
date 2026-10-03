@@ -6,7 +6,12 @@ use std::fmt;
 #[derive(Debug)]
 pub enum TransportError {
     /// ALSA library call failed (`errno`-style negative code).
-    Alsa { op: &'static str, code: i32 },
+    Alsa {
+        /// Operation name (ALSA function).
+        op: &'static str,
+        /// ALSA error code.
+        code: i32,
+    },
     /// Invalid configuration (empty name, bad group, etc.).
     Config(&'static str),
     /// UMP / SysEx7 framing error.
@@ -28,6 +33,7 @@ impl fmt::Display for TransportError {
 
 impl std::error::Error for TransportError {}
 
+/// Transport result type.
 pub type Result<T> = std::result::Result<T, TransportError>;
 
 pub(crate) fn alsa_check(op: &'static str, code: i32) -> Result<()> {

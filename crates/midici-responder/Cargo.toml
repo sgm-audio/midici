@@ -1,12 +1,22 @@
 [package]
 name = "midici-responder"
-description = "Ergonomic MIDI-CI responder façade: timers, rings, event pump"
+description = "Ergonomic MIDI-CI responder façade (re-exports the PE engine; event-pump helpers land next)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["midi", "midi2", "midi-ci", "ump", "responder"]
+categories = ["multimedia::audio"]
+readme = "README.md"
+
+[dependencies]
+midici-core = { path = "../midici-core", version = "0.1.0" }
+midici-pe = { path = "../midici-pe", version = "0.1.0" }
+
+[dev-dependencies]
+rand_core = { version = "0.6.4", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

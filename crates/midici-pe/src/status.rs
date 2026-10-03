@@ -6,6 +6,11 @@
 pub enum PeStatus {
     /// 200 Success/Ok. // M2-103 §7.4.1 Table 15
     Ok = 200,
+    /// 201 Accepted – Set accepted but results not guaranteed. // M2-103 §7.4.1
+    ///
+    /// (ARD §4 lists 202 for Set; M2-103 v1.2 Table 15 defines 201 and no 202 —
+    /// the pinned spec wins. See PROGRESS.md Phase 7.)
+    Accepted = 201,
     /// 341 Resource Currently Unavailable or an Error Occurred. // M2-103 §7.4.1
     ///
     /// ARD §7 maps stalled multi-chunk tx → 341.
@@ -37,6 +42,7 @@ impl PeStatus {
     pub fn from_u16(v: u16) -> Option<Self> {
         match v {
             200 => Some(Self::Ok),
+            201 => Some(Self::Accepted),
             341 => Some(Self::Unavailable),
             400 => Some(Self::BadRequest),
             403 => Some(Self::Forbidden),

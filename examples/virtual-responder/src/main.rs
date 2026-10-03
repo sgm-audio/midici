@@ -13,7 +13,10 @@ use midici_transport_alsa::{run_responder_loop, EndpointConfig, LoopOptions};
 use rand::Rng;
 
 #[derive(Parser, Debug)]
-#[command(name = "virtual-responder", about = "MIDI-CI responder on a virtual ALSA UMP endpoint")]
+#[command(
+    name = "virtual-responder",
+    about = "MIDI-CI responder on a virtual ALSA UMP endpoint"
+)]
 struct Cli {
     /// ALSA sequencer client name (`aseqdump -l`).
     #[arg(long, default_value = "midici")]

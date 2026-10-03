@@ -41,11 +41,14 @@
   ALSA transport (ARD §2/§9). No committed crate links ALSA yet, so builds do not require them today.
 - Cargo dependencies download from crates.io at build time; the startup update script runs
   `cargo fetch` to pre-warm them. No other refresh step is needed.
-- **Known pre-existing breakage (not an env problem):** whole-workspace commands
-  (`cargo build/test/clippy --workspace`, `cargo fmt --all -- --check`) currently FAIL, isolated to
-  `crates/midici-transport-clap`. `src/ring.rs` uses `[u8; N * B]` (a const-generic expression that
-  needs nightly `generic_const_exprs`) and is also unformatted. This is the open item logged under
-  "Phase 6 CI debugging" in `docs/PROGRESS.md`; fix it there, do not treat it as a setup failure.
+- **Fixed in Phase 7:** the `crates/midici-transport-clap` breakage above is resolved —
+  `ring.rs` uses `[[u8; B]; N]` (stable), the `wrap_around` test logic bug is fixed, and a
+  genuine SPSC race (pop exposing an already-published slot) is fixed via
+  `Consumer::peek()`/`Consumer::commit()`. Whole-workspace commands and miri now pass.
+- WSL environment used in Phase 7 (this host had no `distrobox`/Cursor-Cloud VM): WSL
+  Ubuntu (`wsl -d Ubuntu`), rustup stable 1.97.1 auto-pinned, vendored `libasound2t64`
+  extracted to `~/alsa` + minimal `~/bin/pkg-config` shim (no root); cargo runs use
+  `RUSTFLAGS="-L /home/scott/alsa/usr/lib/x86_64-linux-gnu -C link-args=-Wl,-rpath,…"`.
 - To build/test the crates that DO compile (the real protocol surface), scope commands, e.g.:
   `cargo test -p midici-core -p midici-pe -p midici-conformance -p midici-responder -p midici-transport-alsa`
   and `cargo clippy` / `cargo run` on the same set. `examples/virtual-responder` and

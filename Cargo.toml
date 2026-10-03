@@ -16,6 +16,8 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/sgm-audio/midici"
+homepage = "https://github.com/sgm-audio/midici"
+documentation = "https://docs.rs/releases/search?query=midici"
 authors = ["SGM Studios"]
 rust-version = "1.97.1"
 
@@ -23,6 +25,9 @@ rust-version = "1.97.1"
 # Workspace default is `deny` so the ALSA FFI crate may `allow(unsafe_code)`.
 # Every non-FFI member sets `unsafe_code = "forbid"` in its own manifest.
 unsafe_code = "deny"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+missing_copy_implementations = "warn"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
