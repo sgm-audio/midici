@@ -1219,3 +1219,7 @@ exit=127
 ### Final review-tooling notes — 2026-10-04
 - An intermediate `git diff --check` after removing a tentative event-queue policy flagged an extra blank line at EOF in `crates/midici-pe/src/responder.rs`; the blank line was removed and the final check passed.
 - At the last PR status query, head `f520db71ef5edebd7832ff5f7afb6005ad9a1287` remained open/draft/mergeable, but GitHub reported an empty check rollup and `gh pr checks` reported no checks for that head. The last visible runs were the failed, empty-step runs recorded above for `b56d7e1`; no successful check is available.
+
+### PR check update after follow-up — 2026-10-04
+- GitHub re-ran the workflows on head `cd99f9efcb284186307f9cbd8c4c0c404ed66713` and marked the CI, Rust, rust-clippy, and GitHub Advanced Security runs failed within roughly 2–3 seconds. CI run `37225845698` again had empty job `steps`; fetching its failed logs returned `EOF`.
+- Local static checks on the full branch diff still pass (`git diff --check`, 15 TOML files including Cargo.lock, 30 local Markdown links). Rust tooling remains unavailable. Root cause of the GitHub failures remains unknown; no source-level test result is available.
