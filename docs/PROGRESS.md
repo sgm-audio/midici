@@ -1211,3 +1211,7 @@ exit=127
 - Committed review changes as `1368ec8` (`fix: harden MIDI-CI and PE edge handling`) and pushed only `arena/01a105e2-midici` to `origin`.
 - Created draft PR #14 from `arena/01a105e2-midici` to `main`: https://github.com/sgm-audio/midici/pull/14
 - At the first post-create status check, GitHub reported the PR open and mergeable; all nine visible checks were queued (Rust build, CI fmt/clippy/test/doc/cargo-deny/link-check/fuzz-smoke, and rust-clippy analyze). No PR check had completed, so no green result is claimed. Check status must be re-read before merge.
+
+### PR CI follow-up — 2026-10-04
+- At head `b56d7e16c6d93c248c564c73df0aaf4364005b71`, PR #14's visible checks were all marked failed within 2–4 seconds. CI run `37225752370` reported seven jobs with empty `steps` arrays; Rust run `37225752360` and rust-clippy run `37225752460` also reported empty `steps` arrays. GitHub Advanced Security run `37225753377` was also marked failed.
+- Fetching failed CI logs for `37225752370` returned `EOF`. No check output or source-level failure is available, so the root cause remains unknown and these are not treated as code-test failures or passes. PR #14 remains draft; recheck Actions after account/workflow status is clarified.
