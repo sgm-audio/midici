@@ -1215,3 +1215,7 @@ exit=127
 ### PR CI follow-up — 2026-10-04
 - At head `b56d7e16c6d93c248c564c73df0aaf4364005b71`, PR #14's visible checks were all marked failed within 2–4 seconds. CI run `37225752370` reported seven jobs with empty `steps` arrays; Rust run `37225752360` and rust-clippy run `37225752460` also reported empty `steps` arrays. GitHub Advanced Security run `37225753377` was also marked failed.
 - Fetching failed CI logs for `37225752370` returned `EOF`. No check output or source-level failure is available, so the root cause remains unknown and these are not treated as code-test failures or passes. PR #14 remains draft; recheck Actions after account/workflow status is clarified.
+
+### Final review-tooling notes — 2026-10-04
+- An intermediate `git diff --check` after removing a tentative event-queue policy flagged an extra blank line at EOF in `crates/midici-pe/src/responder.rs`; the blank line was removed and the final check passed.
+- At the last PR status query, head `f520db71ef5edebd7832ff5f7afb6005ad9a1287` remained open/draft/mergeable, but GitHub reported an empty check rollup and `gh pr checks` reported no checks for that head. The last visible runs were the failed, empty-step runs recorded above for `b56d7e1`; no successful check is available.
