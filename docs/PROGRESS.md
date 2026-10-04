@@ -1206,3 +1206,8 @@ exit=127
 
 ### Next phase
 - Run the pinned Rust 1.97.1 build/test/fmt/Clippy/doc/deny suite and feature-gated fuzz/Miri checks in an authorized environment with ALSA 1.2.13+; inspect any new PR checks. Resolve the high/medium findings and human gates above before treating the stack as verified or merge-ready.
+
+### PR follow-up — 2026-10-04
+- Committed review changes as `1368ec8` (`fix: harden MIDI-CI and PE edge handling`) and pushed only `arena/01a105e2-midici` to `origin`.
+- Created draft PR #14 from `arena/01a105e2-midici` to `main`: https://github.com/sgm-audio/midici/pull/14
+- At the first post-create status check, GitHub reported the PR open and mergeable; all nine visible checks were queued (Rust build, CI fmt/clippy/test/doc/cargo-deny/link-check/fuzz-smoke, and rust-clippy analyze). No PR check had completed, so no green result is claimed. Check status must be re-read before merge.
