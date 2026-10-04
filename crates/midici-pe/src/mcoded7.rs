@@ -1,4 +1,13 @@
 //! Mcoded7: 8-bit ↔ 7-bit encoding for PE Property Data. // M2-103 §6.1.7
+//!
+//! ## Example
+//!
+//! ```
+//! let raw = b"binary \x00\xFF ok";
+//! let wire = midici_pe::mcoded7_encode(raw);
+//! assert!(wire.iter().all(|b| *b <= 0x7F)); // SysEx-safe
+//! assert_eq!(midici_pe::mcoded7_decode(&wire).unwrap(), raw);
+//! ```
 
 use alloc::vec::Vec;
 

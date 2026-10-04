@@ -150,6 +150,23 @@ pub const SUB_ID2_PE_GET_INQUIRY: u8 = 0x34;
 /// Sub-ID#2: Reply to Get Property Data. // M2-101 Appendix E / §8.8 Table 34
 pub const SUB_ID2_PE_GET_REPLY: u8 = 0x35;
 
+/// Sub-ID#2: Inquiry: Set Property Data. // M2-101 Appendix E / §8.9 Table 35
+pub const SUB_ID2_PE_SET_INQUIRY: u8 = 0x36;
+
+/// Sub-ID#2: Reply to Set Property Data. // M2-101 Appendix E / §8.10 Table 36
+pub const SUB_ID2_PE_SET_REPLY: u8 = 0x37;
+
+/// Sub-ID#2: Subscription. // M2-101 Appendix E / §8.11 Table 37
+pub const SUB_ID2_PE_SUBSCRIPTION: u8 = 0x38;
+
+/// Sub-ID#2: Reply to Subscription. // M2-101 Appendix E / §8.12 Table 38
+pub const SUB_ID2_PE_SUBSCRIPTION_REPLY: u8 = 0x39;
+
+/// Sub-ID#2: Notify (deprecated in MIDI-CI v1.2; honored for backward
+/// compatibility only — updates use Subscription `command`, ACK/NAK replace
+/// the rest). // M2-101 Appendix E / §8.13 Table 39; M2-103 §12
+pub const SUB_ID2_PE_NOTIFY: u8 = 0x3F;
+
 /// PE Major/Minor for Common Rules 1.0/1.1 (also used until M2-101 lists a newer row).
 /// // M2-101 §8.5 Table 31
 pub const PE_VERSION_MAJOR: u8 = 0x00;
@@ -162,4 +179,12 @@ pub const PE_DEFAULT_SIMULTANEOUS_REQUESTS: u8 = 4;
 #[inline]
 pub const fn is_pe_sub_id(sub_id2: u8) -> bool {
     (sub_id2 & 0xF0) == 0x30
+}
+
+/// Returns true if `sub_id2` carries a chunked PE data message (requestId +
+/// header + numChunks/chunkNum + property data framing). Caps (0x30/0x31) are
+/// excluded — they are fixed-format. // M2-101 §8.7–§8.13 Tables 33–39
+#[inline]
+pub const fn is_pe_chunked_sub_id(sub_id2: u8) -> bool {
+    matches!(sub_id2, 0x34..=0x39 | SUB_ID2_PE_NOTIFY)
 }

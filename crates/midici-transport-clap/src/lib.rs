@@ -29,8 +29,9 @@ mod tests {
         let mut cons = unsafe { crate::ring::Consumer::new(&ring) };
         let body = [0x7E, 0x7F, 0x0D, 0x70, 0x02];
         assert!(prod.push(&body));
-        let data = cons.pop().unwrap();
+        let data = cons.peek().unwrap();
         let len = data.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
         assert_eq!(&data[..len], &body[..]);
+        cons.commit();
     }
 }

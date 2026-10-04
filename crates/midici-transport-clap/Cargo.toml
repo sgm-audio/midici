@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["midi", "midi2", "midi-ci", "ump", "clap"]
+categories = ["multimedia::audio"]
+readme = "README.md"
 
 [lints]
 workspace = true

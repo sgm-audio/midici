@@ -7,6 +7,12 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["midi", "midi2", "midi-ci", "ump", "sysex"]
+categories = ["multimedia::audio", "no-std"]
+readme = "README.md"
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = []
@@ -14,7 +20,7 @@ default = []
 zlib = ["dep:miniz_oxide"]
 
 [dependencies]
-midici-core = { path = "../midici-core" }
+midici-core = { path = "../midici-core", version = "0.1.0" }
 rand_core = { version = "0.6.4", default-features = false }
 miniz_oxide = { version = "0.8", optional = true, default-features = false, features = ["with-alloc"] }
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }

@@ -1,0 +1,48 @@
+# release-plz configuration for the midici workspace.
+# https://release-plz.dev/docs/config
+
+[workspace]
+# Keep each crate's changelog in sync with the conventional-commit history.
+changelog_update = true
+# Publish in dependency order automatically inferred from path deps:
+#   midici-core → midici-pe → midici-responder → midici-transport-alsa → midici-transport-clap
+# (release-plz topo-sorts the workspace; path deps carry `version = "0.1.0"`).
+dependencies_update = true
+semver_check = false # 0.1.0 initial publish; enable after the first public release
+
+# All publishable crates share the root changelog for their GH releases.
+[[package]]
+name = "midici-core"
+changelog_path = "../../CHANGELOG.md"
+
+[[package]]
+name = "midici-pe"
+changelog_path = "../../CHANGELOG.md"
+
+[[package]]
+name = "midici-responder"
+changelog_path = "../../CHANGELOG.md"
+
+[[package]]
+name = "midici-transport-alsa"
+changelog_path = "../../CHANGELOG.md"
+
+[[package]]
+name = "midici-transport-clap"
+changelog_path = "../../CHANGELOG.md"
+
+# Harness + examples are never published/released.
+[[package]]
+name = "midici-conformance"
+publish = false
+release = false
+
+[[package]]
+name = "virtual-responder"
+publish = false
+release = false
+
+[[package]]
+name = "clap-autoprop"
+publish = false
+release = false

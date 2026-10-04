@@ -25,8 +25,11 @@ jobs:
   clippy:
     name: clippy
     runs-on: ubuntu-latest
+    container: ubuntu:26.04  # alsa-lib >= 1.2.13 (UMP *_set_* symbols, ALSA_1.2.13 ver)
     steps:
       - uses: actions/checkout@v4
+      - name: Install build deps
+        run: apt-get update && apt-get install -y libasound2-dev pkg-config build-essential curl
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.97.1"
@@ -37,8 +40,11 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    container: ubuntu:26.04  # alsa-lib >= 1.2.13 (UMP *_set_* symbols, ALSA_1.2.13 ver)
     steps:
       - uses: actions/checkout@v4
+      - name: Install build deps
+        run: apt-get update && apt-get install -y libasound2-dev pkg-config build-essential curl
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.97.1"
@@ -48,8 +54,11 @@ jobs:
   doc:
     name: doc
     runs-on: ubuntu-latest
+    container: ubuntu:26.04  # alsa-lib >= 1.2.13 (UMP *_set_* symbols, ALSA_1.2.13 ver)
     steps:
       - uses: actions/checkout@v4
+      - name: Install build deps
+        run: apt-get update && apt-get install -y libasound2-dev pkg-config build-essential curl
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.97.1"
@@ -67,6 +76,17 @@ jobs:
         with:
           command: check
           rust-version: "1.97.1"
+
+  link-check:
+    name: link-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: lychee link check (pinned to a tag SHA — CVE-safe)
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: "--verbose --no-progress README.md docs/guide/ CHANGELOG.md"
+          fail: true
 
   fuzz-smoke:
     name: fuzz-smoke (60s/target)
