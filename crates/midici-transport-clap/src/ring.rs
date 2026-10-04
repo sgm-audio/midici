@@ -231,6 +231,8 @@ pub struct Consumer<'a, const N: usize, const B: usize> {
     cached_read: usize,
     /// Cached write index (updated on empty-ring check).
     cached_write: usize,
+    /// A slot may be committed only after a successful `peek`.
+    peeked: bool,
 }
 
 impl<'a, const N: usize, const B: usize> Consumer<'a, N, B> {
@@ -247,6 +249,7 @@ impl<'a, const N: usize, const B: usize> Consumer<'a, N, B> {
             ring,
             cached_read,
             cached_write,
+            peeked: false,
         }
     }
 
@@ -273,14 +276,20 @@ impl<'a, const N: usize, const B: usize> Consumer<'a, N, B> {
         // points at it (a full ring has N pending; this slot is not yet
         // committed, so it still counts as pending).
         let data: &[u8] = unsafe { core::slice::from_raw_parts(buf_ptr.add(offset), B) };
+        self.peeked = true;
         Some(data)
     }
 
-    /// Consume the slot named by the last [`Self::peek`]. Publishes the read
-    /// index so the producer may reuse the slot. Call only after the data
-    /// from `peek` has been fully used (copied out / forwarded).
+    /// Consume the slot named by the last successful [`Self::peek`]. Publishes
+    /// the read index so the producer may reuse the slot. Call only after the
+    /// data from `peek` has been fully used (copied out / forwarded). Calls
+    /// without an uncommitted successful `peek` are ignored.
     #[inline]
     pub fn commit(&mut self) {
+        if !self.peeked {
+            return;
+        }
+        self.peeked = false;
         self.cached_read = self.cached_read.wrapping_add(1);
         self.ring
             .read_idx
@@ -339,6 +348,24 @@ mod tests {
         assert!(popped[16..].iter().all(|&b| b == 0));
         cons.commit();
         assert!(cons.peek().is_none());
+    }
+
+    #[test]
+    fn commit_requires_a_successful_uncommitted_peek() {
+        let ring = Ring::<2, 16>::new();
+        let mut prod = unsafe { Producer::new(&ring) };
+        let mut cons = unsafe { Consumer::new(&ring) };
+
+        // Committing an empty ring must not advance the consumer past the
+        // producer and make the ring appear permanently full.
+        cons.commit();
+        assert!(prod.push(b"first"));
+        assert_eq!(&cons.peek().unwrap()[..5], b"first");
+
+        cons.commit();
+        cons.commit(); // a second commit must be a no-op
+        assert!(prod.push(b"second"));
+        assert_eq!(&cons.peek().unwrap()[..6], b"second");
     }
 
     #[test]

@@ -1,133 +1,70 @@
-# Spec Coverage
+# Implementation status and specification coverage
 
-Message-by-message coverage vs M2-101-UM (MIDI-CI v1.2) and M2-103-UM (PE v1.1).
+Static source audit dated 2026-10-04. Status means that code exists in this checkout; it is **not** a current build, conformance, hardware, or interoperability pass. The workspace test suite could not be run in this environment because Cargo is unavailable; see [`PROGRESS.md`](../PROGRESS.md).
 
-## Management (M2-101 §5 / Appendix E)
+## Status legend
 
-| Sub-ID#2 | Message | Status | Spec Ref | Notes |
-|----------|---------|--------|----------|-------|
-| 0x70 | Discovery | ✅ | §5.5 Table 6 | Broadcast + directed; caps bits, max SysEx, output path |
-| 0x71 | Reply to Discovery | ✅ | §5.6 Table 8 | Identity, caps, max SysEx, negotiated features |
-| 0x72 | Endpoint Inquiry | ✅ | §5.7 Table 9 | Product Instance ID only |
-| 0x73 | Endpoint Reply | 🔄 inquiry-only | §5.8 Table 11 | Sends Inquiry; Reply NAKs NotSupported |
-| 0x7D | ACK | ✅ | §5.10 Table 13 | Status 0x00/0x10/0x11; feature-masked for v1.1 |
-| 0x7E | Invalidate MUID | ✅ | §5.9 Table 12 | Broadcast dest; collision → regen + re-announce |
-| 0x7F | NAK | ✅ | §5.11 Table 15 | All status codes; typed `NakCode` |
+- **Implemented in source** — code path exists; current verification status is stated separately.
+- **Partial** — codecs or a subset exist, but the responder behavior is incomplete.
+- **Not implemented** — no implementation was found in the checked-in source.
+- **Not verified** — no external, hardware, or performance evidence is recorded.
+- **Human decision** — protocol/design conflict must be resolved before changing behavior.
 
-### Capability Bits (M2-101 §5.5.2 Table 7)
+## MIDI-CI management
 
-| Bit | Category | Advertised | Handled |
-|-----|----------|------------|---------|
-| D1 | Protocol Negotiation | ❌ (deprecated) | ❌ |
-| D2 | Profile Configuration | ✅ | 🔄 inquiry-only |
-| D3 | Property Exchange | ✅ | ✅ full |
-| D4 | Process Inquiry | ✅ | ❌ (v2) |
+| Message / area | Status | Evidence and limits |
+|---|---|---|
+| Discovery `0x70` / Reply `0x71` | Implemented in source | `midici-core/src/engine.rs` handles Discovery, peer recording, and replies; model and transcript tests exist. |
+| MUID collision / Invalidate `0x7E` | Implemented in source | Collision path invalidates, regenerates, and re-announces; incoming invalidation removes a peer or regenerates our MUID. |
+| ACK `0x7D` | Partial | Outbound ACK is feature-masked for known v1.2 peers; inbound ACK is decoded and discarded without an application event. This is not a general ACK transaction/flow-control implementation. |
+| NAK `0x7F` | Implemented in source | Typed NAK encoding/decoding and an inbound `CiEvent::Nak` path exist. The complete status mapping still needs clause-level review. |
+| Endpoint Inquiry `0x72` / Reply `0x73` | Partial | Wire codecs and an outgoing inquiry helper exist. The responder currently answers an incoming inquiry with `NotSupported`; incoming Endpoint Reply is ignored. |
+| Profile Configuration `0x20`–`0x29` | Not implemented | Messages fall through to the unsupported-message path; there is no zero-profile inquiry responder. |
+| Process Inquiry | Not implemented | No handler found. |
+| Capability advertisement | Partial / caller-controlled | `CiConfig::responder_default` advertises PE only. Callers can set other category bits, but the engine does not verify that matching handlers exist. |
 
-## Property Exchange (M2-101 §8 / M2-103)
+## Property Exchange
 
-| Sub-ID#2 | Message | Status | Spec Ref | Notes |
-|----------|---------|--------|----------|-------|
-| 0x30 | PE Capabilities Inquiry | ✅ | §8.5 Table 30 | Negotiates simultaneous + PE version |
-| 0x31 | PE Capabilities Reply | ✅ | §8.6 Table 32 | |
-| 0x34 | Get Inquiry | ✅ | §8.7 Table 33 | JSON header, chunked |
-| 0x35 | Get Reply | ✅ | §8.8 Table 34 | JSON header + body, status codes |
-| 0x36 | Set Inquiry | ✅ | §8.9 | Write policy per-resource (default NotAllowed/405); auto-Notifies subscribers |
-| 0x37 | Set Reply | ✅ | §8.10 | `{"status":…}` header-only |
-| 0x38 | Subscribe | ✅ | §8.11 | `start/end` inbound; `partial/full/notify` updates outbound |
-| 0x39 | Subscribe Reply | ✅ | §8.12 | `{"status",subscribeId}`; SubId = 8-hex responder-allocated |
-| 0x3F | Notify | ✅ receive-only | §8.13 | Deprecated v1.2; honored: status 144 terminates the named request |
+| Area | Status | Evidence and limits |
+|---|---|---|
+| PE Capabilities `0x30`/`0x31` | Implemented in source, with a capacity risk | The responder advertises its local PE version/limit and stores peer capability rows, but the `PeerPe` vector has no configured count bound. Unique peer capability inquiries can grow this state without a configured bound. Choose a bounded admission/eviction policy (which may affect active transactions/subscriptions) before changing behavior. No external interoperability evidence is recorded. |
+| Get `0x34`/`0x35` | Implemented in source | Resource lookup, reply status/header, and chunking exist. Response payloads are capped at 64 KiB. |
+| Set `0x36`/`0x37` | Implemented in source | Custom resource `set` methods are called; the default trait policy is read-only. Successful writes surface a `PeEvent::PropertySet`. |
+| Subscription `0x38`/`0x39` | Implemented in source | Start/end lifecycle, subscription IDs, outbound updates, and peer cleanup exist. |
+| Legacy Notify `0x3F` | Partial | A receive-only path parses termination status and cancels reassembly by request ID. It is not a general initiator-side Notify transaction implementation. |
+| Resource registry | Partial | Built-in `DeviceInfo` and `ResourceList` exist; applications can register custom resources. There is no built-in `ChCtrlList`, `State`, `StateList`, or `ProfileList`. |
+| Mcoded7 / zlib | Codec-only | Mcoded7 helpers and optional zlib helpers exist. The responder path does not negotiate `mutualEncoding` or apply these codecs to PE payloads. `zlib_codec::decode` has no explicit decompressed-output limit; do not use it on untrusted compressed input until bounded decoding is added. |
+| Chunking / reassembly | Implemented with limits | Chunk splitting clamps SysEx size to 128–4096 bytes; reassembly reserves per-peer/per-transaction storage, caps a property transaction at 64 KiB, allows four concurrent transactions per peer, and times out inactive fragments after 3 seconds. |
+| Busy status 445 | **Human decision** | `midici-pe/src/status.rs` follows the ARD's 445 busy mapping, while its own comment records M2-103 Table 15 as assigning 445 a different meaning and 343 to “Too Many Requests.” Do not change this public wire behavior until the spec owner resolves the conflict. See [`PROGRESS.md`](../PROGRESS.md). |
 
-### PE Status Codes (M2-103 §7.4.1 Table 15)
+## Resources and integrations
 
-| Code | Name | Used | Mapping |
-|------|------|------|---------|
-| 200 | OK | ✅ | `PeStatus::Ok` |
-| 341 | Unavailable | ✅ | `PeStatus::Unavailable` (stall timeout) |
-| 400 | Bad Request | ✅ | `PeStatus::BadRequest` (malformed JSON, bad header) |
-| 403 | Forbidden | ✅ | `PeStatus::Forbidden` (resource flag) |
-| 404 | Not Found | ✅ | `PeStatus::NotFound` (unknown resource) |
-| 405 | Not Allowed | ✅ | `PeStatus::NotAllowed` (resource flag, Set on read-only) |
-| 413 | Payload Too Large | ✅ | `PeStatus::PayloadTooLarge` (chunk flood, >64 KiB) |
-| 445 | Busy | ✅ | `PeStatus::Busy` (5th concurrent tx) — *ARD §7; M2-103 lists 343* |
+| Item | Status | Evidence and limits |
+|---|---|---|
+| `DeviceInfo` | Implemented in source | Shipped `PropertyResource` based on `DeviceIdentity`. |
+| `ResourceList` | Implemented in source | Shipped with `with_device_info`; registered resources are included when using `register`. Direct edits through `resources_mut` bypass refresh. |
+| `ChCtrlList` / automatic plugin mapping | Not implemented | Only a test stand-in in `examples/clap-autoprop`; no CLAP parameter enumeration or production resource builder. |
+| ALSA UMP transport | Implemented in source; live status not verified here | Sequencer endpoint setup, UMP/SysEx7 conversion, and responder loop exist. The live test is ignored by default and requires ALSA UMP support/device access. `Sysex7Reassembler` has no message-size or inactivity bound, and the control loop drains input until empty without a per-tick budget or shutdown check inside the drain; untrusted sustained input can grow memory or delay polling/shutdown. |
+| CLAP transport/plugin | Partial | `midici-transport-clap` contains an SPSC fixed-slot ring only. There are no CLAP ABI/event bindings or loadable plugin. The ring also does not preserve each pushed byte slice's actual length, so it is not yet a variable-length SysEx bridge. |
+| CoreMIDI / Windows MIDI Services | Not implemented | No transport crates were found. |
 
-**Note:** M2-103 Table 15 lists 343 as "Too Many Requests" and 445 as "Invalid Version of Data". This stack follows ARD §7 / Phase-4 DoD mapping excess concurrent → **445**. Documented on `PeStatus::Busy`.
+## Conformance and verification evidence
 
-### Encodings (M2-103 §6)
+| Area | Repository evidence | What it does not establish |
+|---|---|---|
+| Unit/property/model tests | Tests are present across core, PE, transport, and conformance crates. | They were not run in this review environment. No current local pass is claimed. |
+| Golden messages/transcripts | Checked-in fixtures are deterministic, constructed examples; replay tests compare output bytes. | They are not captures from MIDI 2.0 Workbench, Wireshark, a DAW, or hardware. The historical human review gates in `docs/VERIFY.md` remain unresolved. |
+| Fuzzing | Two targets exist: `fuzz_mcoded7` and `fuzz_reassemble`; CI is configured for a 60-second smoke run per target. | No fuzz execution result is available in this review. The advertised `10^8`-execution gate is not configured. |
+| RT checks | SPSC ring source and Miri tests exist; historical Miri results are in `PROGRESS.md`. | No CLAP callback integration exists, and no `assert_no_alloc` gate or 24-hour soak is present. A ring-only Miri result is not proof of a complete plugin RT contract. |
+| Interoperability | See [`INTEROP.md`](../INTEROP.md). | All empty cells mean not tested; they are not pass results. |
+| Build/lint/docs/advisories | CI workflows define Cargo checks. | Local build/test/fmt/clippy/doc/deny commands could not start because Cargo/Rust tools are absent. Recent GitHub Actions runs are marked failed; the available job API returned no steps and log retrieval failed with `EOF`, so the cause is unknown. An account billing lock is mentioned in earlier progress notes but was not reverified as the cause of these runs. |
 
-| Encoding | Status | Spec Ref |
-|----------|--------|----------|
-| ASCII (7-bit JSON) | ✅ | §6.1.6 |
-| Mcoded7 | ✅ | §6.1.7 |
-| zlib + Mcoded7 | feature `zlib` | §6.1.8 |
+## Deferred scope
 
-### Chunking (M2-101 §8.3 / M2-103 §5.2)
-
-| Rule | Status | Spec Ref |
-|------|--------|----------|
-| requestId (7-bit) correlation | ✅ | §5.3 |
-| numChunks/chunkNum (14-bit) | ✅ | §5.2 |
-| Header only in chunk 1 | ✅ | §8.3.1 |
-| Header-only = single chunk | ✅ | §8.3.2 |
-| Clamp 128..=4096 | ✅ | §5.5.3 / ARD §4 |
-
-## Resources (ARD §5 / M2-103 §6.2)
-
-| Resource | Status | Spec Ref | Notes |
-|----------|--------|----------|-------|
-| DeviceInfo | ✅ | §6.2.1 | Manufacturer/Family/Model/Version arrays |
-| ResourceList | ✅ | §6.2.2 | Auto-generated from registry |
-| ChCtrlList | ✅ | §8.2 / ARD §5 | Full per-channel + per-note mapping |
-| State | 🔄 v2 | §6.2.3 | Needs plugin state extension design |
-| StateList | 🔄 v2 | §6.2.4 | |
-| ProfileList | 🔄 v2 | §7 | |
-
-## Profiles (M2-101 §6–7)
-
-| Message | Status | Notes |
-|---------|--------|-------|
-| 0x20 Profile Inquiry | 🔄 inquiry-only | Replies zero profiles |
-| 0x21 Profile Inquiry Reply | 🔄 inquiry-only | |
-| 0x22 Profile Set | 🔄 v2 | NAK NotSupported |
-| 0x23 Profile Set Reply | 🔄 v2 | |
-| 0x24 Profile Get | 🔄 v2 | |
-| 0x25 Profile Get Reply | 🔄 v2 | |
-| 0x26 Profile Enabled | 🔄 v2 | |
-| 0x27 Profile Disabled | 🔄 v2 | |
-| 0x28 Profile Specific Data | 🔄 v2 | |
-| 0x29 Profile Specific Data Reply | 🔄 v2 | |
-
-**v1 ships polite refusal:** all Profile messages beyond Inquiry/Reply NAK with NotSupported. Full profile support (DAW Ctrl, Orchestral Articulation) is v2.
-
-## Version Handling
-
-| Scenario | Behavior |
-|----------|----------|
-| We advertise v1.2 | `ci ver = 0x02` |
-| Peer is v1.1 | Mask v1.2-only features (ACK, Endpoint); never NAK on version |
-| Peer sends reserved version bits | NAK 0x02 (Version Not Supported) |
-| Peer sends unknown sub-ID#2 | NAK 0x01 (Not Supported) |
-
-## Gaps & Deferred (Honest)
-
-| Area | Gap | Target |
-|------|-----|--------|
-| PE Set | ✅ Phase 7 (write policy + fan-out) | — |
-| PE Subscribe/Notify | ✅ Phase 7 (SubId alloc, lifecycle, peer-liveness reap) | — |
-| Profile Configuration | Inquiry-only; rest NAK | v2 |
-| Process Inquiry | Not implemented | v2 |
-| State/StateList resources | Deferred | v2 |
-| CoreMIDI transport | Not started | v2 |
-| Windows MIDI Services transport | Not started | v2 |
-| SMF2/Clip File | Separate crate | later |
-| Initiator (client) role | Responder-only v1 | v2 |
-
-## Test Coverage
-
-| Test Type | Coverage |
-|-----------|----------|
-| Golden transcript replay | Discovery, PE Caps, Get DeviceInfo, Set+Subscribe+Notify exchange |
-| NAK matrix | All 7 status codes + malformed |
-| Loopback | max SysEx 128 + 4096; payload equality + chunk count; Set 200/403/404/405; subscribe→notify→unsubscribe; peer-vanish reap |
-| Fuzz | SysEx framing, CI header, PE JSON, reassembler (10⁶ execs each) |
-| Property tests | Mcoded7 round-trip; chunk split/reassemble identity |
-| RT audit | `assert_no_alloc` + miri on ring; 24h soak |
+- MIDI-CI initiator/client role.
+- Full Profile Configuration and Process Inquiry.
+- Endpoint Information responder behavior.
+- PE encoding negotiation/integration beyond 7-bit JSON.
+- A complete CLAP plugin and `ChCtrlList` builder.
+- CoreMIDI and Windows MIDI Services transports.
+- External interoperability, long-duration soak, and performance gates.

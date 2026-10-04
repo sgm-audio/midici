@@ -1,80 +1,45 @@
-# ANNOUNCE.md — 0.1.0 release checklist + drafts
+# ANNOUNCE.md — release record and human-owned drafts
 
-Everything here is a **draft for Scott** (HUMAN GATE G10). The agent never holds
-or uses a crates.io token; `CARGO_REGISTRY_TOKEN` lives in repo secrets and the
-`release` workflow's `publish-crates` job runs only on a final `vX.Y.Z` tag.
+This file contains drafts, not approval to publish a new announcement. The 0.1.0 crates.io/GitHub release was completed on 2026-09-25 (see `docs/PROGRESS.md`); the human conformance/interoperability gates below remain open. The agent does not post announcements or handle registry credentials.
 
-## Release checklist
+## Release and evidence status
 
-### Pre-flight
-- [ ] G1: mgmt goldens reviewed against M2-101 PDFs (VERIFY.md)
-- [ ] VERIFY.md: phase-7 constructed golden `05-pe-set-subscribe` reviewed
-- [ ] G5: live ALSA evidence pasted into PROGRESS.md (`aseqdump` + Workbench)
-- [ ] CI green on main (fmt / clippy / test / doc / deny / fuzz-smoke / link-check)
-- [ ] `git-cliff` CHANGELOG.md refreshed for the v0.1.0 section
-- [ ] `cargo publish --dry-run` outputs (Phase 10, PROGRESS.md): leaf crates
-      clean; midici-pe/responder/transport-alsa verified by release-plz in
-      dependency order once midici-core 0.1.0 hits the index
+| Item | Status | Evidence / next action |
+|---|---|---|
+| 0.1.0 crates.io publish | Complete | Phase 10 record in `docs/PROGRESS.md`; all five crates published. |
+| 0.1.0 GitHub release | Complete | Phase 10 record; release contains the Linux `virtual-responder` binary and checksum file. |
+| Management vector human review (G1) | **Pending** | Compare constructed vectors with the checked-in M2-101 PDF; record sign-off in `docs/VERIFY.md`. |
+| Constructed PE vector review | **Pending** | Review `05-pe-set-subscribe.transcript` against M2-101/M2-103 and record sign-off. |
+| Live ALSA / external peer evidence (G5) | **Pending** | Run the live smoke test and an external MIDI-CI peer test; record exact environment/results in `docs/PROGRESS.md` and `docs/INTEROP.md`. |
+| Fresh CI results | **Unavailable in this review** | Prior release CI was green. Recent Actions runs are marked failed, but their steps/logs were unavailable during review, so the cause is unknown (an account billing lock was recorded earlier). Current local Cargo checks are also unavailable. |
+| midi2.dev community submission | **Pending / human-owned** | Confirm submission channel and record a real URL after submission. |
 
-### Ship it (Scott)
-- [ ] `git tag v0.1.0-rc1 && git push origin v0.1.0-rc1` → check release
-      workflow (draft release + SHA256SUMS attached)
-- [ ] Confirm glibc compat of `virtual-responder` binary (built on GH
-      ubuntu-latest; static-musl build can be added later if needed)
-- [ ] `git tag v0.1.0 && git push origin v0.1.0` → release-plz publishes in
-      order: `midici-core` → `midici-pe` → `midici-responder` →
-      `midici-transport-alsa` → `midici-transport-clap`
-- [ ] Verify on crates.io + docs.rs (links below)
-- [ ] Publish the draft GitHub release
+Do not present blank interop cells as passes. See [`INTEROP.md`](INTEROP.md).
 
-### crates.io / docs.rs live links (check after publish)
-- <https://crates.io/crates/midici-core> · <https://docs.rs/midici-core>
-- <https://crates.io/crates/midici-pe> · <https://docs.rs/midici-pe>
-- <https://crates.io/crates/midici-responder> · <https://docs.rs/midici-responder>
-- <https://crates.io/crates/midici-transport-alsa> · <https://docs.rs/midici-transport-alsa>
-- <https://crates.io/crates/midici-transport-clap> · <https://docs.rs/midici-transport-clap>
+## Accurate short description (draft only)
 
-### midi2.dev community submission
-- [ ] Submit the project to the midi2.dev community/links page (repo URL,
-      one-paragraph summary). Note: submission channel/format is on Scott —
-      paste the actual submission URL here once filed.
+> **midici 0.1.0** is a Rust MIDI-CI responder prototype with a sans-I/O management engine, a partial Property Exchange responder, and a Linux ALSA UMP adapter. It includes deterministic constructed fixtures and in-repository loopback tests. It is not a full MIDI-CI implementation or an externally validated interoperability claim. Profile Configuration, Process Inquiry, positive Endpoint Information responses, PE encoding negotiation, a CLAP plugin, and a built-in `ChCtrlList` are not implemented. The CLAP crate currently contains a fixed-slot SPSC ring whose payload-length limitation must be resolved before variable-length SysEx use.
 
-## Post drafts (Scott posts; agent does not)
+Review [`README.md`](../README.md) and [`docs/guide/spec-coverage.md`](guide/spec-coverage.md) before reusing this wording. Do not claim hardware/DAW interoperability or a plugin auto-mapping demo without new evidence.
 
-> Shared blurb (use everywhere): **midici** is a MIT-licensed Rust stack for the
-> MIDI 2.0 control plane — a sans-io MIDI-CI v1.2 responder with Property
-> Exchange (Get/Set/subscriptions with notify fan-out), DoS-capped chunk
-> reassembly, golden-transcript conformance, and a miri-verified RT ring for
-> CLAP plugins. Responder role for 0.1.0; initiator + profiles come next.
+## Human-owned post drafts — not ready to post without revision
 
 ### r/rust
-**Title:** `midici 0.1.0 — MIDI-CI / Property Exchange responder stack for MIDI
-2.0 in Rust (sans-io, no_std-friendly)`
 
-Body: blurb + quickstart (`cargo run -p virtual-responder`) + what it does
-(discovery, PE get/set/sub with automatic notify, per-peer concurrency caps) +
-what it doesn't do yet (initiator role, full Profiles, State resources) +
-link to repo and the autoprop demo cast (`docs/media/autoprop.cast`, G9a).
+**Possible title:** `midici 0.1.0 — a Rust MIDI-CI / Property Exchange responder prototype`
 
-### KVR developers forum (DSP and Plugin Development)
-Blurb + the autoprop story: a CLAP plugin whose parameters show up on a
-MIDI-CI controller without mapping work; params flush → 0x38 partial updates
-only from the control thread; the RT thread does two ring memcpys per event.
+Before posting, add an accurate quickstart and scope note. `cargo run -p virtual-responder -- --help` displays CLI options; running the daemon requires Linux ALSA UMP support (ALSA 1.2.13+) and a usable `/dev/snd/seq`. The checked-in goldens are constructed, not external captures. Do not link to a nonexistent demo recording.
+
+### KVR developers forum
+
+**HOLD:** the CLAP/`ChCtrlList` auto-mapping story is not implemented. Do not claim there is a loadable CLAP plugin, parameter-derived controller list, or tested CLAP host flow. Revisit only after those artifacts and external evidence exist.
 
 ### LinkedIn
-Shorter: blurb + architecture diagram screenshot + repo + cast link.
 
-## Rollback procedure
+**HOLD:** no architecture screenshot or demo recording is checked in. Use only the accurate short description above after a human review.
 
-If a published 0.1.0 crate is broken:
+## Rollback guidance for a future release
 
-1. **Yank, don't delete**: `cargo yank --vers 0.1.0 midici-<crate>` for each
-   affected crate (dependents stay buildable via lockfiles; new resolves stop).
-   Crates with reverse deps must be yanked in reverse order is *not* required —
-   yank is per-crate.
-2. Revert the release commit: `git revert <rel>` on a `fix/` branch.
-3. `git tag -d v0.1.0 && git push origin :v0.1.0` if the tag itself must move;
-   then publish the fixed version as `v0.1.1` (never re-tag a published
-   crates.io version — the registry is immutable).
-4. Mark the GitHub release as pre-release/broken in the notes; add the link to
-   the fix issue.
+1. If a published crate is broken, yank the affected version (do not delete it) and publish a fixed version after review. Coordinate dependent crates as needed.
+2. Do not move, delete, or recreate the `v0.1.0` tag: it identifies an immutable published crate release. A correction should use a new version and tag (for example, `0.1.1` / `v0.1.1`).
+3. Update GitHub release notes to describe the issue and point to the fixed release.

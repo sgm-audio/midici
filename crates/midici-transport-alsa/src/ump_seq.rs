@@ -5,7 +5,7 @@
 //! `snd_seq_set_ump_endpoint_info`, `snd_seq_ump_event_*`). Those live in
 //! `alsa-sys` 0.6 (bound against alsa-lib ≥ 1.2.10). // ARD §2 / Phase 5 decision
 
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::mem::MaybeUninit;
 use std::os::raw::{c_int, c_uint};
 use std::ptr;
@@ -13,6 +13,20 @@ use std::ptr;
 use alsa_sys as ffi;
 
 use crate::error::{alsa_check, Result, TransportError};
+
+/// Owns an open ALSA sequencer handle while endpoint setup is in progress.
+struct SeqGuard(*mut ffi::snd_seq_t);
+
+impl Drop for SeqGuard {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                let _ = ffi::snd_seq_close(self.0);
+            }
+            self.0 = ptr::null_mut();
+        }
+    }
+}
 
 /// Bidirectional ALSA sequencer client configured as a UMP MIDI 2.0 endpoint.
 pub struct UmpSeqEndpoint {
@@ -90,21 +104,33 @@ impl UmpSeqEndpoint {
             return Err(TransportError::Config("UMP group must be 0..=15"));
         }
         let alsa_ump_group = cfg.group + 1; // ALSA: 1..=16
+        // Validate names before allocating any ALSA handles/info structures.
+        let client_cstr = CString::new(cfg.client_name.as_str())
+            .map_err(|_| TransportError::Config("client name contains NUL"))?;
+        let endpoint_cstr = CString::new(cfg.endpoint_name.as_str())
+            .map_err(|_| TransportError::Config("endpoint name contains NUL"))?;
 
         let mut seq: *mut ffi::snd_seq_t = ptr::null_mut();
         // DUPLEX open. // alsa-lib seq.h
-        alsa_check("snd_seq_open", unsafe {
+        let open_rc = unsafe {
             ffi::snd_seq_open(
                 &mut seq,
                 c"default".as_ptr(),
                 ffi::SND_SEQ_OPEN_DUPLEX as c_int,
                 0,
             )
-        })?;
+        };
+        let mut seq_guard = SeqGuard(seq);
+        alsa_check("snd_seq_open", open_rc)?;
+        if seq_guard.0.is_null() {
+            return Err(TransportError::Alsa {
+                op: "snd_seq_open",
+                code: -libc::EIO,
+            });
+        }
+        let seq = seq_guard.0;
         alsa_check("snd_seq_nonblock", unsafe { ffi::snd_seq_nonblock(seq, 1) })?;
 
-        let client_cstr = CString::new(cfg.client_name.as_str())
-            .map_err(|_| TransportError::Config("client name contains NUL"))?;
         alsa_check("snd_seq_set_client_name", unsafe {
             ffi::snd_seq_set_client_name(seq, client_cstr.as_ptr())
         })?;
@@ -124,11 +150,13 @@ impl UmpSeqEndpoint {
             });
         }
 
-        set_endpoint_info(seq, cfg)?;
-        set_block_info(seq, cfg, alsa_ump_group)?;
+        set_endpoint_info(seq, cfg, &endpoint_cstr)?;
+        set_block_info(seq, cfg, alsa_ump_group, &endpoint_cstr)?;
 
-        let port = create_ump_port(seq, cfg, alsa_ump_group)?;
+        let port = create_ump_port(seq, cfg, alsa_ump_group, &endpoint_cstr)?;
 
+        // Transfer handle ownership to the endpoint's Drop implementation.
+        seq_guard.0 = ptr::null_mut();
         Ok(Self {
             seq,
             client,
@@ -245,13 +273,15 @@ impl UmpSeqEndpoint {
 
 use std::os::raw::c_short;
 
-fn set_endpoint_info(seq: *mut ffi::snd_seq_t, cfg: &EndpointConfig) -> Result<()> {
+fn set_endpoint_info(
+    seq: *mut ffi::snd_seq_t,
+    cfg: &EndpointConfig,
+    name: &CStr,
+) -> Result<()> {
     let mut info: *mut ffi::snd_ump_endpoint_info_t = ptr::null_mut();
     alsa_check("snd_ump_endpoint_info_malloc", unsafe {
         ffi::snd_ump_endpoint_info_malloc(&mut info)
     })?;
-    let name = CString::new(cfg.endpoint_name.as_str())
-        .map_err(|_| TransportError::Config("endpoint name contains NUL"))?;
     unsafe {
         ffi::snd_ump_endpoint_info_clear(info);
         ffi::snd_ump_endpoint_info_set_name(info, name.as_ptr());
@@ -278,13 +308,12 @@ fn set_block_info(
     seq: *mut ffi::snd_seq_t,
     cfg: &EndpointConfig,
     alsa_ump_group: u8,
+    name: &CStr,
 ) -> Result<()> {
     let mut info: *mut ffi::snd_ump_block_info_t = ptr::null_mut();
     alsa_check("snd_ump_block_info_malloc", unsafe {
         ffi::snd_ump_block_info_malloc(&mut info)
     })?;
-    let name = CString::new(cfg.endpoint_name.as_str())
-        .map_err(|_| TransportError::Config("block name contains NUL"))?;
     unsafe {
         ffi::snd_ump_block_info_clear(info);
         ffi::snd_ump_block_info_set_block_id(info, 0);
@@ -311,13 +340,12 @@ fn create_ump_port(
     seq: *mut ffi::snd_seq_t,
     cfg: &EndpointConfig,
     alsa_ump_group: u8,
+    name: &CStr,
 ) -> Result<i32> {
     let mut info: *mut ffi::snd_seq_port_info_t = ptr::null_mut();
     alsa_check("snd_seq_port_info_malloc", unsafe {
         ffi::snd_seq_port_info_malloc(&mut info)
     })?;
-    let name = CString::new(cfg.endpoint_name.as_str())
-        .map_err(|_| TransportError::Config("port name contains NUL"))?;
     let caps = ffi::SND_SEQ_PORT_CAP_READ
         | ffi::SND_SEQ_PORT_CAP_WRITE
         | ffi::SND_SEQ_PORT_CAP_SUBS_READ
@@ -373,6 +401,27 @@ mod tests {
         assert!(matches!(
             UmpSeqEndpoint::create(&cfg),
             Err(TransportError::Config(_))
+        ));
+    }
+
+    #[test]
+    fn config_rejects_nul_names_before_opening_alsa() {
+        let client = EndpointConfig {
+            client_name: String::from("bad\0client"),
+            ..EndpointConfig::default()
+        };
+        assert!(matches!(
+            UmpSeqEndpoint::create(&client),
+            Err(TransportError::Config("client name contains NUL"))
+        ));
+
+        let endpoint = EndpointConfig {
+            endpoint_name: String::from("bad\0endpoint"),
+            ..EndpointConfig::default()
+        };
+        assert!(matches!(
+            UmpSeqEndpoint::create(&endpoint),
+            Err(TransportError::Config("endpoint name contains NUL"))
         ));
     }
 }

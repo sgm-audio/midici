@@ -1,6 +1,6 @@
 [package]
 name = "clap-autoprop"
-description = "CLAP plugin exposing ChCtrlList from clap_plugin_params"
+description = "PE parameter-update helper and loopback tests; not a loadable CLAP plugin"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

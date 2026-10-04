@@ -99,6 +99,23 @@ fn broadcast_discovery_replies_and_discovers_peer() {
 }
 
 #[test]
+fn zero_peer_limit_is_normalized_before_discovery() {
+    let mut config = cfg();
+    config.max_peers = 0;
+    let mut eng = CiEngine::new(config, StdRng::seed_from_u64(0x0BAD));
+    let peer = Muid::ordinary(0x0102_0304).unwrap();
+
+    assert_eq!(eng.config().max_peers, 1);
+    eng.feed_sysex(
+        0,
+        &discovery_from(peer, Muid::BROADCAST, MESSAGE_FORMAT_VERSION_1_2, 512, 0),
+    )
+    .unwrap();
+    assert_eq!(eng.peers().len(), 1);
+    assert_eq!(eng.peers()[0].muid, peer);
+}
+
+#[test]
 fn directed_discovery_same_as_broadcast_when_addressed_to_us() {
     let mut eng = engine(0xBEEF);
     let our = eng.muid();

@@ -82,6 +82,10 @@ use alloc::vec::Vec;
 
 use rand_core::RngCore;
 
+use midici_core::spec::{
+    is_pe_chunked_sub_id, message_format_version_reserved_set, SUB_ID2_PE_CAPS_INQUIRY,
+    SUB_ID2_PE_CAPS_REPLY,
+};
 use midici_core::{CiConfig, CiEngine, CiError, CiEvent, Muid, OutboundSysex};
 
 use crate::controller::{NotifyBody, PeController, PeEvent};
@@ -130,15 +134,31 @@ impl<R: RngCore> ResponderEngine<R> {
 
     pub fn feed_sysex(&mut self, group: u8, body: &[u8]) -> Result<(), CiError> {
         if PeController::is_pe_body(body) {
-            let peer_max = midici_core::CiHeader::decode(body)
-                .ok()
-                .and_then(|(h, _)| {
-                    self.ci
-                        .peers()
-                        .iter()
-                        .find(|p| p.muid == h.source)
-                        .map(|p| p.max_sysex)
-                })
+            let (header, _) = midici_core::CiHeader::decode(body)?;
+            // PE routing must preserve CiEngine's reserved-version NAK path;
+            // PE messages otherwise bypass the management router below.
+            if message_format_version_reserved_set(header.version) {
+                return self.ci.feed_sysex(group, body);
+            }
+            // Match CiEngine's destination policy: messages for another device
+            // are silently ignored; broadcast messages are addressed to us too.
+            if header.dest != self.ci.muid() && !header.dest.is_broadcast() {
+                return Ok(());
+            }
+            if header.sub_id2 != SUB_ID2_PE_CAPS_INQUIRY
+                && header.sub_id2 != SUB_ID2_PE_CAPS_REPLY
+                && !is_pe_chunked_sub_id(header.sub_id2)
+            {
+                // Unknown/reserved Sub-ID#2 values use CiEngine's normal
+                // NotSupported NAK path instead of being silently swallowed.
+                return self.ci.feed_sysex(group, body);
+            }
+            let peer_max = self
+                .ci
+                .peers()
+                .iter()
+                .find(|p| p.muid == header.source)
+                .map(|p| p.max_sysex)
                 .unwrap_or(self.ci.config().max_sysex_size);
             return self
                 .pe

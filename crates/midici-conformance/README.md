@@ -1,12 +1,12 @@
 # midici-conformance
 
-Golden transcripts, fuzz targets, interop harness. Append-only goldens.
+Deterministic constructed golden fixtures, replay/loopback tests, and two PE fuzz targets. These fixtures are not external packet captures; see `docs/VERIFY.md` for human-review status and `docs/INTEROP.md` for external evidence. Goldens are append-only.
 
 ## What it does
 
-- **Golden transcripts** — byte-exact replay of Discovery/PE exchanges (`goldens/exchanges/*.transcript`, incl. `05-pe-set-subscribe`)
-- **Management goldens** — individual message round-trips (`goldens/mgmt/*.hex`)
-- **Fuzz targets** — `fuzz_mcoded7`, `fuzz_reassemble` (cargo-fuzz, nightly)
+- **Constructed exchange fixtures** — deterministic replay of Discovery/PE exchanges (`goldens/exchanges/*.transcript`, including `05-pe-set-subscribe`); no external capture provenance is recorded
+- **Constructed management vectors** — individual message round-trips (`goldens/mgmt/*.hex`); human review is still pending in `docs/VERIFY.md`
+- **Fuzz targets** — `fuzz_mcoded7`, `fuzz_reassemble` (cargo-fuzz, nightly); CI is configured for 60 seconds per target, but this review has no current run result
 - **Test initiator shim** — `TestInitiator` (test-only, not published) drives Discovery → PE Caps → Get / Set / Subscribe loopback
 - **Set/subscription tests** — status matrix (200/403/404/405), multi-chunk Set, lifecycle (subscribe → notify → unsubscribe; vanish → reaped)
 - **`XTestResource`** — canned writable + subscribable `X-Test` resource used by tests and goldens
@@ -37,10 +37,10 @@ MAX_SYSEX <u32>
 CAPS <hex>
 FB <hex>
 PATH <hex>
-GROUP <u8>
+GROUP <u8>       # default UMP group for subsequent inbound/outbound steps
 XTEST             # register the canned writable+subscribable X-Test resource
-> [group] <hex...>   # inbound
-< [group] <hex...>   # expected outbound
+> <hex...>         # inbound on the current group
+< <hex...>         # expected outbound on the current group
 POLL <now_ms>
 ```
 

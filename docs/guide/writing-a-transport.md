@@ -1,6 +1,6 @@
 # Writing a Transport Adapter
 
-A transport adapter connects `midici_pe::ResponderEngine` (or `CiEngine` directly) to a platform MIDI API.
+A transport adapter connects `midici_pe::ResponderEngine` (or `CiEngine` directly) to a platform MIDI API. The ALSA adapter is implemented; the CLAP ring is not yet a transport, and CoreMIDI/Windows examples below are future-facing pseudocode.
 
 ## Minimal Contract
 
@@ -54,18 +54,15 @@ loop {
 
 ### Outbound
 
-- `next_outbound()` returns bodies already chunk-split to negotiated max SysEx size
-- Transport must frame as SysEx7 UMP packets (1-4 words each)
-- Must use the `group` from `OutboundSysex`
+- `ResponderEngine` PE replies are chunk-split to the negotiated/clamped SysEx size; `CiEngine` management messages are not PE-chunked.
+- The transport must frame each body as SysEx7 UMP packets and preserve the `group` from `OutboundSysex`.
+- Do not assume that the CLAP ring can currently carry variable-length bodies: it zero-pads fixed slots and does not record the original length.
 
 ### Timing
 
-- `poll(now)` must be called at **≥10 Hz** (100 ms max interval)
-- `now` = monotonic milliseconds since arbitrary epoch
-- Engine uses this for:
-  - MUID collision retry backoff
-  - Reassembler inactivity timeout (3 s)
-  - ACK/NAK flow control timers
+- Pass monotonic milliseconds since an arbitrary epoch to `poll(now)`.
+- The ALSA control loop polls every 10 ms. The PE responder uses polling for its 3-second reassembly inactivity timeout and peer-state cleanup.
+- `CiEngine::poll` accepts the timestamp but currently does not store or use it, and does not drive management retry or ACK/NAK timers. Do not rely on those timers being implemented.
 
 ### Threading
 
@@ -98,30 +95,13 @@ for pkt in encode_sysex7_packets(group, &body)? {
 
 Key files: `ump_seq.rs`, `sysex7_ump.rs`, `control_loop.rs`
 
-### CLAP — `midici-transport-clap`
+### CLAP — `midici-transport-clap` (not yet an adapter)
 
-```rust
-// RT side (audio thread) — midici-transport-clap ring
-for event in input_events {
-    if event.is_sysex() {
-        ring_in.push(event.sysex_body());
-    }
-}
-while let Some(slot) = ring_out.peek() {
-    output_events.push_sysex(slot);
-    ring_out.commit();
-}
+The crate currently exposes only `Ring`, `Producer`, and `Consumer`. It has no CLAP event wrappers or host-timer integration. Do not wire variable-length SysEx through it yet: a pushed slice is zero-padded to `B` bytes and its original length is lost.
 
-// Control side (host timer callback)
-engine.feed_sysex(group, &inbound_from_ring)?;
-engine.poll(now);
-while let Some(out) = engine.next_outbound() {
-    ring_out.push(&out.body);
-}
-```
+The architectural sketch in [`rt-contract.md`](rt-contract.md) is pseudocode only. A CLAP bridge needs an explicit bounded length/framing design, event bindings, an audited callback, and tests before it can be called an implemented transport.
 
-Key files today: `ring.rs`. The CLAP `sys` event wrappers + `ChCtrlList`
-resource are Phase-6/8 follow-ups.
+Key file today: `crates/midici-transport-clap/src/ring.rs`.
 
 ### CoreMIDI (macOS) — future
 

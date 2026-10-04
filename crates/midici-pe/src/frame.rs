@@ -58,6 +58,9 @@ impl PeChunk {
             return Err(PeError::BadField);
         }
         let property = data[off..off + nd].to_vec();
+        if property.iter().any(|b| *b > 0x7F) {
+            return Err(PeError::BadField);
+        }
         // Header only in chunk 1. // M2-101 §8.3.1
         if chunk_num != 1 && nh != 0 {
             return Err(PeError::InconsistentChunking);
@@ -82,7 +85,7 @@ impl PeChunk {
         if self.num_chunks > U14_MAX || self.chunk_num > U14_MAX {
             return Err(PeError::BadField);
         }
-        if self.header.iter().any(|b| *b > 0x7F) {
+        if self.header.iter().any(|b| *b > 0x7F) || self.property.iter().any(|b| *b > 0x7F) {
             return Err(PeError::BadField);
         }
         if self.chunk_num != 1 && !self.header.is_empty() {
@@ -115,5 +118,34 @@ impl PeChunk {
         let n = self.encode(&mut out)?;
         out.truncate(n);
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn property_bytes_must_be_7bit_on_encode_and_decode() {
+        let invalid = PeChunk {
+            request_id: 1,
+            header: b"{}".to_vec(),
+            num_chunks: 1,
+            chunk_num: 1,
+            property: alloc::vec![0x80],
+        };
+        assert_eq!(invalid.to_vec(), Err(PeError::BadField));
+
+        let mut raw = PeChunk {
+            request_id: 1,
+            header: b"{}".to_vec(),
+            num_chunks: 1,
+            chunk_num: 1,
+            property: b"x".to_vec(),
+        }
+        .to_vec()
+        .unwrap();
+        *raw.last_mut().unwrap() = 0x80;
+        assert_eq!(PeChunk::decode(&raw), Err(PeError::BadField));
     }
 }

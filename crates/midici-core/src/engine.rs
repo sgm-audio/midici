@@ -34,16 +34,18 @@ pub struct CiEngine<R: RngCore> {
     peers: Vec<PeerState>,
     outbound: VecDeque<OutboundSysex>,
     events: VecDeque<CiEvent>,
-    /// Last `now` observed by [`Self::poll`] (monotonic millis).
-    now_ms: u64,
     encode_buf: Vec<u8>,
 }
 
 impl<R: RngCore> CiEngine<R> {
     /// Construct an engine, generating an ordinary MUID from `rng`. // M2-101 §3.3.1
-    pub fn new(cfg: CiConfig, mut rng: R) -> Self {
+    pub fn new(mut cfg: CiConfig, mut rng: R) -> Self {
         let our_muid = Muid::generate(&mut rng);
-        let max_peers = cfg.max_peers.max(1);
+        // Keep the configured bound consistent with the minimum storage size.
+        // Without normalizing the config, max_peers = 0 makes the first peer
+        // insertion try to evict index 0 from an empty table.
+        cfg.max_peers = cfg.max_peers.max(1);
+        let max_peers = cfg.max_peers;
         let encode_buf = alloc::vec![0u8; ENCODE_SCRATCH];
         Self {
             cfg,
@@ -52,7 +54,6 @@ impl<R: RngCore> CiEngine<R> {
             peers: Vec::with_capacity(max_peers),
             outbound: VecDeque::with_capacity(OUTBOUND_CAP),
             events: VecDeque::with_capacity(EVENT_CAP),
-            now_ms: 0,
             encode_buf,
         }
     }
@@ -135,12 +136,9 @@ impl<R: RngCore> CiEngine<R> {
         }
     }
 
-    /// Drive timeouts. `now` is monotonic millis. // ARD §3
-    pub fn poll(&mut self, now: u64) {
-        self.now_ms = now;
-        // Management-only phase: no PE inactivity timers yet.
-        let _ = self.now_ms;
-    }
+    /// Accept a monotonic timestamp. The management engine currently has no
+    /// poll-driven timers; PE reassembly timers are handled by `midici-pe`.
+    pub fn poll(&mut self, _now: u64) {}
 
     /// Drain one outbound SysEx body. // ARD §3
     pub fn next_outbound(&mut self) -> Option<OutboundSysex> {

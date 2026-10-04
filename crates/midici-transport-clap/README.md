@@ -1,49 +1,39 @@
 # midici-transport-clap
 
-CLAP plugin transport adapter core: the miri-verified, wait-free SPSC byte ring that bridges the audio thread and the control thread.
+**Status: ring primitive only — not a CLAP transport or plugin.** This crate contains a fixed-slot SPSC ring intended as one future component of a CLAP audio/control bridge. It has no CLAP ABI/event bindings, host timer, `clap_process` callback, or `ChCtrlList` builder.
 
-## What it does (today)
+## What the ring provides
 
-- **`Ring<const N, const B>`** — flat slot ring (default 64 × 512 B); zero alloc, zero lock, zero logging on either path
-- **`Producer::push`** — RT-safe; on overflow: drop + relaxed `AtomicUsize` counter (never stalls audio)
-- **`Consumer::peek` / `commit`** — two-phase consumption: the slot is published as consumed only by `commit`, so the producer can never overwrite bytes the reader is still using (this was a real race caught by miri)
-- Geometry is const-generic and tunable; storage is `[[u8; B]; N]` for stable Rust
+- `Ring<const N, const B>`, `Producer::push`, and `Consumer::peek` / `commit` / `pop_into`.
+- Fixed `N × B` storage; no heap allocation in ring operations.
+- One producer and one consumer only; the unsafe constructors require callers to uphold SPSC ownership.
+- Full-ring and oversize pushes are dropped and counted.
+- Consumer slots remain reserved until `commit`; commit without an uncommitted successful `peek` is ignored.
 
-Layers landing next (CLAP `sys` event wrappers, host-timer control loop,
-`ChCtrlList` built from `clap_plugin_params`, the `clap-autoprop` plugin
-binary) are Phase-6/8 follow-ups; the PE side they will drive
-(`midici_pe::ResponderEngine` + subscriptions) is already complete — see
-`examples/clap-autoprop` for the control-thread `flush_param_change` wiring.
+## Blocking limitation before variable-length SysEx use
 
-## RT Contract
+A successful `push(data)` copies `data` into a `B`-byte slot and zero-pads the rest. The ring does **not** store `data.len()`, and `peek()` returns the entire `B`-byte slot. MIDI SysEx data can contain zero bytes, so a consumer cannot reliably infer the original length from padding. Treat this crate as a low-level prototype; do not use it as a variable-length SysEx bridge until an explicit length/framing design is added.
 
-Audio thread (`clap_process`):
-- Copy inbound SysEx event bytes → `ring_in.push(...)`
-- `while let Some(slot) = ring_out.peek() { emit_midi_event(slot); ring_out.commit(); }`
-- **No parsing, no JSON, no allocation, no locks, no logging**
+## Historical verification
 
-Control thread (host timer, 10 ms via `clap_host_timer`):
-- Drains rings, drives `ResponderEngine::poll(now)`, runs all JSON/PE work, pushes replies into `ring_out`
+Ring unit tests and Miri tests are present. Earlier runs are recorded in `docs/PROGRESS.md`; the current review added a guard against empty/double consumer commits but could not rerun Cargo or Miri because Rust tooling is unavailable in this environment. A ring-only Miri run does not verify a CLAP plugin RT path.
 
-## Why clap-sys, not clack (Phase 6 decision)
+## Example (fixed-width slot only)
 
-`clap-sys` gives byte-level control of MIDI events, direct timer registration, and an auditable FFI surface. `clack`'s ergonomic layer introduces allocation patterns infeasible to audit exhaustively. ARD §6 is non-negotiable.
-
-## Example
-
-```rust
+```rust,ignore
 use midici_transport_clap::{Consumer, Producer, Ring};
 
-let ring: Ring<64, 512> = Ring::new(); // 32 KiB, fixed geometry
-// SAFETY: SPSC — exactly one producer thread and one consumer thread.
-let (mut prod, mut cons) = unsafe { (Producer::new(&ring), Consumer::new(&ring)) };
-prod.push(&sysex_body);
-if let Some(slot) = cons.peek() {
-    handle_sysex(slot); // slot valid until commit
-    cons.commit();
+let ring: Ring<64, 512> = Ring::new();
+// SAFETY: exactly one producer and one consumer may access this ring.
+let (mut producer, mut consumer) = unsafe {
+    (Producer::new(&ring), Consumer::new(&ring))
+};
+producer.push(b"example");
+if let Some(slot) = consumer.peek() {
+    // `slot.len()` is 512; the original input length is not available.
+    consume_fixed_slot(slot);
+    consumer.commit();
 }
 ```
 
-## Dependencies
-
-None beyond std/core. (No `rtrb`, no `heapless` — the ring is ~200 lines of audited atomic code.)
+The ARD's desired CLAP callback/control-thread design is documented in [`docs/guide/rt-contract.md`](../../docs/guide/rt-contract.md), but it is not implemented here.

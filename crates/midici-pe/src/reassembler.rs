@@ -226,22 +226,30 @@ impl Reassembler {
 
         if chunk.chunk_num == 1 {
             if chunk.header.len() > slot.header.capacity() {
+                slot.clear();
                 return Err(PeError::HeaderTooLarge);
             }
             if slot.header_set && slot.header.as_slice() != chunk.header.as_slice() {
+                slot.clear();
                 return Err(PeError::InconsistentChunking);
             }
             slot.header.clear();
             slot.header.extend_from_slice(&chunk.header);
             slot.header_set = true;
         } else if !chunk.header.is_empty() {
+            slot.clear();
             return Err(PeError::InconsistentChunking);
         }
 
+        if chunk.num_chunks as usize > MAX_FRAGMENT_RECORDS {
+            slot.clear();
+            return Err(PeError::Oversize);
+        }
         if chunk.num_chunks != 0 {
             if slot.num_chunks == 0 {
                 slot.num_chunks = chunk.num_chunks;
             } else if slot.num_chunks != chunk.num_chunks {
+                slot.clear();
                 return Err(PeError::InconsistentChunking);
             }
         }
@@ -252,11 +260,24 @@ impl Reassembler {
             slot.clear();
             return Err(PeError::InconsistentChunking);
         }
+        if chunk.chunk_num as usize > MAX_FRAGMENT_RECORDS {
+            slot.clear();
+            return Err(PeError::Oversize);
+        }
+        if slot.num_chunks != 0
+            && (chunk.chunk_num > slot.num_chunks
+                || slot.index.iter().any(|f| f.chunk_num > slot.num_chunks))
+        {
+            slot.clear();
+            return Err(PeError::InconsistentChunking);
+        }
 
         if slot.index.iter().any(|f| f.chunk_num == chunk.chunk_num) {
+            slot.clear();
             return Err(PeError::InconsistentChunking);
         }
         if slot.index.len() == slot.index.capacity() {
+            slot.clear();
             return Err(PeError::Oversize);
         }
 
@@ -423,4 +444,77 @@ fn assemble_body(slot: &TxSlot) -> Result<Vec<u8>, PeError> {
         body.extend_from_slice(&slot.arena[start..end]);
     }
     Ok(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frame::PeChunk;
+
+    fn peer() -> Muid {
+        Muid::ordinary(0x0102_0304).unwrap()
+    }
+
+    fn chunk(
+        request_id: u8,
+        header: &[u8],
+        num_chunks: u16,
+        chunk_num: u16,
+        property: &[u8],
+    ) -> Vec<u8> {
+        PeChunk {
+            request_id,
+            header: header.to_vec(),
+            num_chunks,
+            chunk_num,
+            property: property.to_vec(),
+        }
+        .to_vec()
+        .unwrap()
+    }
+
+    #[test]
+    fn rejects_chunk_number_beyond_declared_total_and_releases_slot() {
+        let mut reassembler = Reassembler::new(1);
+        let first = chunk(7, br#"{"resource":"X"}"#, 0, 1, b"{");
+        assert_eq!(reassembler.feed(peer(), &first, 0), Ok(None));
+        assert_eq!(reassembler.memory_stats().active_slots, 1);
+
+        // The first fragment did not announce a total. Once chunk 2 declares
+        // one chunk total, the already active transaction is inconsistent.
+        let invalid = chunk(7, b"", 1, 2, b"}");
+        assert_eq!(
+            reassembler.feed(peer(), &invalid, 1),
+            Err(PeError::InconsistentChunking)
+        );
+        assert_eq!(reassembler.memory_stats().active_slots, 0);
+
+        // A malformed sequence must not pin the request ID or its slot.
+        let valid = chunk(7, br#"{"resource":"X"}"#, 1, 1, b"{}");
+        assert!(matches!(
+            reassembler.feed(peer(), &valid, 2),
+            Ok(Some(ReassembleEvent::Complete {
+                request_id: 7,
+                body,
+                ..
+            })) if body.as_slice() == b"{}"
+        ));
+    }
+
+    #[test]
+    fn rejects_chunk_totals_larger_than_reserved_metadata() {
+        let mut reassembler = Reassembler::new(1);
+        let oversized = chunk(
+            9,
+            b"{}",
+            (MAX_FRAGMENT_RECORDS + 1) as u16,
+            1,
+            b"",
+        );
+        assert_eq!(
+            reassembler.feed(peer(), &oversized, 0),
+            Err(PeError::Oversize)
+        );
+        assert_eq!(reassembler.memory_stats().active_slots, 0);
+    }
 }

@@ -3,10 +3,10 @@
 
 mod common;
 
-use midici_core::{CiConfig, DeviceIdentity, Muid};
+use midici_core::{CiConfig, DeviceIdentity, Muid, Nak, NakCode};
 use midici_pe::{
-    encode_reply_header, split, DeviceInfoResource, PeQuery, PeStatus, PropertyResource,
-    ResourceRegistry, ResponderEngine,
+    encode_reply_header, split, DeviceInfoResource, Payload, PeQuery, PeResult, PeStatus,
+    PropertyResource, ResourceRegistry, ResponderEngine, MAX_TX_BYTES,
 };
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -21,6 +21,22 @@ fn identity() -> DeviceIdentity {
         family: 3,
         model: 4,
         software_revision: [2, 0, 0, 0],
+    }
+}
+
+struct LargeResource {
+    body: Vec<u8>,
+}
+
+impl PropertyResource for LargeResource {
+    fn resource(&self) -> &str {
+        "Large"
+    }
+
+    fn get(&self, _req: &PeQuery) -> PeResult<Payload> {
+        Ok(Payload {
+            body: self.body.clone(),
+        })
     }
 }
 
@@ -122,4 +138,95 @@ fn pe_loopback_max_sysex_128() {
 #[test]
 fn pe_loopback_max_sysex_4096() {
     run_loopback(4096);
+}
+
+#[test]
+fn pe_get_for_another_destination_is_silently_dropped() {
+    let mut responder = make_responder(512);
+    let peer = Muid::ordinary(0x0102_0304).unwrap();
+    let other = Muid::ordinary(0x0506_0708).unwrap();
+    let mut init = TestInitiator::new(peer, 512);
+
+    for body in init.get(other, "DeviceInfo") {
+        responder.feed_sysex(0, &body).unwrap();
+    }
+
+    assert!(drain_all(&mut responder).is_empty());
+}
+
+#[test]
+fn unknown_pe_sub_id_gets_not_supported_nak() {
+    let mut responder = make_responder(512);
+    let peer = Muid::ordinary(0x0102_0304).unwrap();
+    let mut init = TestInitiator::new(peer, 512);
+    let mut request = init
+        .get(responder.muid(), "DeviceInfo")
+        .into_iter()
+        .next()
+        .expect("single-chunk Get");
+    request[3] = 0x3A; // reserved/unknown PE-category Sub-ID#2
+
+    responder.feed_sysex(0, &request).unwrap();
+    let outs = drain_all(&mut responder);
+    assert_eq!(outs.len(), 1);
+    let nak = Nak::decode(&outs[0].body).unwrap();
+    assert_eq!(nak.body.status_code, NakCode::NotSupported.to_u8());
+}
+
+#[test]
+fn pe_message_with_reserved_ci_version_bits_gets_version_nak() {
+    let mut responder = make_responder(512);
+    let peer = Muid::ordinary(0x0102_0304).unwrap();
+    let mut init = TestInitiator::new(peer, 512);
+    let mut request = init
+        .get(responder.muid(), "DeviceInfo")
+        .into_iter()
+        .next()
+        .expect("single-chunk Get");
+    request[4] |= midici_core::spec::MESSAGE_FORMAT_VERSION_RESERVED_MASK;
+
+    responder.feed_sysex(0, &request).unwrap();
+    let outs = drain_all(&mut responder);
+    assert_eq!(outs.len(), 1);
+    let nak = Nak::decode(&outs[0].body).unwrap();
+    assert_eq!(nak.body.status_code, NakCode::VersionNotSupported.to_u8());
+}
+
+#[test]
+fn maximum_sized_get_reply_is_not_truncated_by_output_queue() {
+    let mut cfg = CiConfig::responder_default(identity());
+    cfg.max_peers = 1;
+    cfg.max_sysex_size = 128;
+    let expected = format!("\"{}\"", "x".repeat(MAX_TX_BYTES - 2)).into_bytes();
+    assert_eq!(expected.len(), MAX_TX_BYTES);
+
+    let mut registry = ResourceRegistry::with_device_info(identity());
+    registry.register(Box::new(LargeResource {
+        body: expected.clone(),
+    }));
+    let mut responder = ResponderEngine::new(
+        cfg,
+        StdRng::seed_from_u64(0xC0FFEE),
+        registry,
+    );
+    let peer = Muid::ordinary(0x0102_0304).unwrap();
+    let mut init = TestInitiator::new(peer, 128);
+
+    responder.feed_sysex(0, &init.discovery()).unwrap();
+    let discovery_out = drain_all(&mut responder);
+    let dest = parse_reply_to_discovery(&discovery_out[0].body)
+        .expect("Reply to Discovery")
+        .header
+        .source;
+    responder.feed_sysex(0, &init.pe_caps(dest)).unwrap();
+    let _ = drain_all(&mut responder);
+
+    for body in init.get(dest, "Large") {
+        responder.feed_sysex(0, &body).unwrap();
+    }
+    let outs = drain_all(&mut responder);
+    assert!(outs.len() > 64, "test payload must exceed the old queue cap");
+    let (header, body) = collect_get_reply_payload(&outs);
+    assert_eq!(header.status, PeStatus::Ok.as_u16());
+    assert_eq!(body, expected);
 }

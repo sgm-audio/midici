@@ -1,55 +1,39 @@
 # midici-transport-alsa
 
-ALSA UMP sequencer transport adapter (Linux). Creates a virtual UMP endpoint, bridges SysEx7 ↔ F0/F7-stripped bodies, runs 10 ms control loop.
+Linux ALSA UMP sequencer adapter. It creates a virtual UMP endpoint, converts SysEx7 packets to/from F0/F7-stripped bodies, and drives a 10 ms responder control loop.
 
-## What it does
+> **Environment requirement:** build/link against ALSA library 1.2.13 or newer for the UMP sequencer endpoint APIs used here, plus `pkg-config` and the ALSA development package. The live smoke test also needs a usable `/dev/snd/seq` and device permissions.
 
-- **Virtual UMP endpoint** — `snd_seq_set_client_midi_version`, `snd_seq_set_ump_endpoint_info`, `snd_seq_set_ump_block_info`, port `MIDI_UMP` / `UMP_ENDPOINT`
-- **SysEx7 bridge** — `Sysex7Reassembler` + `encode_sysex7_packets()` via `midi2` (sysex7 feature)
-- **Control loop** — 10 ms tick (`CONTROL_TICK`), non-blocking `input_ump()` / `output_ump()`, drives `ResponderEngine`
-- **Live test** — feature `alsa-live` + `#[ignore]` (requires `/dev/snd/seq`)
+## Implemented
 
-## Why alsa-sys not alsa
+- UMP sequencer client/endpoint/block setup through `alsa-sys`.
+- SysEx7 UMP packetization and reassembly through `midi2`.
+- Non-blocking sequencer input/output and a 10 ms control loop around `ResponderEngine`.
+- Optional live smoke test (`alsa-live` feature); it is `#[ignore]` by default and checks local endpoint availability, not peer interoperability.
 
-`alsa` 0.12 exposes rawmidi `Ump` open/read/write but **no** sequencer virtual-endpoint APIs. `alsa-sys` 0.6 exposes the full UMP sequencer symbol set. This crate wraps `alsa-sys` in a thin safe module (`ump_seq`). No hand-rolled ioctls.
+`LoopOptions::on_event` currently exposes management `CiEvent`s only; PE application events are not forwarded by this loop.
 
-## Key types
+## Known safety limitation
 
-```rust
-use midici_transport_alsa::{run_responder_loop, EndpointConfig, LoopOptions};
-use midici_core::DeviceIdentity;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+`Sysex7Reassembler` currently appends continuation packet words to a `Vec` until it sees a Complete/End packet. It has no configured maximum message length or inactivity timeout. An unterminated or excessively large SysEx sequence can therefore grow memory without a bound. Do not expose this transport to untrusted MIDI input until a bounded reassembly policy and regression tests are added.
 
-let running = Arc::new(AtomicBool::new(true));
-let opts = LoopOptions {
-    endpoint: EndpointConfig {
-        client_name: "midici".into(),
-        endpoint_name: "midici-responder".into(),
-        group: 0,
-        manufacturer_id: 0x7D,
-        family_id: 1,
-        model_id: 1,
-        sw_revision: [0, 1, 0, 0],
-    },
-    identity: DeviceIdentity { ... },
-    max_sysex: 512,
-    seed: 0xC0FFEE,
-    on_event: Box::new(|ev| log_event(ev)),
-    running,
-};
+## Why `alsa-sys`
 
-run_responder_loop(opts)?;
+The Rust `alsa` crate version used by the project does not expose the sequencer virtual UMP endpoint APIs required here; `alsa-sys` provides the needed symbols. The unsafe FFI calls are isolated in `ump_seq.rs`; build/test coverage still needs to be run in an environment with the required ALSA library.
+
+## Run the example
+
+```sh
+cargo run -p virtual-responder -- --help
+cargo run -p virtual-responder -- --device-name midici --endpoint-name midici-responder
 ```
 
-## Binary
-
-`cargo run -p virtual-responder` — standalone daemon with CLI flags.
+The first command displays options. The second opens an ALSA virtual endpoint and runs until interrupted.
 
 ## Dependencies
 
-- `alsa-sys` 0.6 — UMP sequencer FFI
-- `libc` — pollfd, errno
-- `midi2` — SysEx7 UMP encode/decode (feature `sysex7`)
-- `midici-core`, `midici-pe` (drives `midici_pe::ResponderEngine`)
-- `rand` — RNG for engine construction
+- `alsa-sys` 0.6 — UMP sequencer FFI.
+- `libc` — `pollfd` and errno handling.
+- `midi2` — SysEx7 UMP encode/decode.
+- `midici-core`, `midici-pe` — responder engines.
+- `rand` — MUID RNG.

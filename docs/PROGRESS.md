@@ -1114,3 +1114,95 @@ gates: fmt OK · clippy -D warnings OK · 23/23 test suites OK · cargo deny OK
 - Per-crate GH releases auto-created (midici-*-v0.1.0); the three earliest have
   empty bodies (created before `changelog_path` pointed at the root CHANGELOG —
   cosmetic, fix by hand or leave).
+
+---
+
+## Repository review — 2026-10-04
+
+### Orientation and baseline
+- Reviewed the workspace manifest/crate manifests, pinned Rust toolchain, `.gitignore`, dependency policy, all CI/release workflows, core/PE/transport source, tests/transcript loaders, architecture and integration docs, and repository release/issue/PR/Actions status.
+- Baseline revision: `302e730d9b22de93fedb7662a8104f1ef3b94eb5` on the Arena review branch `arena/01a105e2-midici`. The published `v0.1.0` release is dated 2026-09-25. All historical PRs are merged; there are no open or closed issues currently listed, and no open PR existed before this review.
+- Workspace shape: Rust 1.97.1 workspace with management/PE/responder crates, Linux ALSA transport, a fixed-slot CLAP ring primitive, conformance fixtures/tests, and two examples. The current Arena checkout has no `cargo`, `rustc`, `rustfmt`, `clippy-driver`, or `cargo-deny`; neither the historical distrobox nor podman is installed. No host packages were installed.
+- The checked-in spec PDFs could not be text-extracted in this environment. No protocol ambiguity was resolved by assumption; management/PE constructed-vector review remains human-owned.
+
+### Done
+- Corrected status documentation to distinguish source implementation from build, conformance, hardware, and interoperability evidence. The ADR/ARD now link to current implementation status instead of being read as shipped-status reports; README, crate READMEs, guides, `VERIFY.md`, `INTEROP.md`, `ANNOUNCE.md`, and CHANGELOG wording were cross-checked against the current source.
+- Corrected the 0.1.0 CHANGELOG release date and moved already-published features out of `[Unreleased]`.
+- Applied localized code fixes and added regression tests (all tests below remain unrun here):
+  - Normalize `CiConfig.max_peers == 0` before management peer insertion; make `CiEngine::poll` an explicit no-op without dead timestamp state.
+  - Validate 7-bit MIDI-CI fixed header fields and PE property bytes on encode/decode.
+  - Reject PE chunk totals/numbers outside reserved limits or declared totals and clear active slots on reassembly consistency/cap errors.
+  - Preserve destination filtering and the core version/unsupported-message NAK paths for PE-category messages.
+  - Size the PE output queue to hold one maximum-size response at minimum SysEx size.
+  - Refresh generated `ResourceList` after normal registrations.
+  - Ignore CLAP consumer commits without a successful, uncommitted `peek`.
+  - Close ALSA sequencer handles on setup errors and reject NUL-containing endpoint/client names before opening ALSA.
+- No dependencies, golden fixtures, release tags, migrations, generated artifacts, or public protocol constants were added/changed. No GitHub issue/PR labels were changed.
+
+### Verification outputs and limits
+
+```text
+$ git diff --check
+PASS
+
+$ Python tomllib parse of all repository *.toml plus Cargo.lock
+PASS: parsed 15 TOML files, including Cargo.lock
+
+$ local Markdown relative-link existence scan
+Checked 30 relative Markdown links
+PASS: no broken relative link targets found
+
+$ credential-pattern scan of tracked working-tree files
+PASS: no credential-like literal matched the selected patterns (not a full history audit)
+
+$ YAML syntax check
+YAML parser unavailable; workflow syntax not independently parsed
+
+$ cargo build --workspace
+bash: line 1: cargo: command not found
+exit=127
+
+$ cargo test --workspace
+bash: line 1: cargo: command not found
+exit=127
+
+$ cargo fmt --all -- --check
+bash: line 1: cargo: command not found
+exit=127
+
+$ cargo clippy --workspace --all-targets -- -D warnings
+bash: line 1: cargo: command not found
+exit=127
+
+$ cargo doc --workspace --no-deps
+bash: line 1: cargo: command not found
+exit=127
+
+$ cargo deny check
+bash: line 1: cargo: command not found
+exit=127
+```
+
+- `rustc`, `rustfmt`, `clippy-driver`, and `cargo-deny` are also unavailable. An attempted Rust toolchain download was blocked by network failure to `static.rust-lang.org` (`curl: (35) OpenSSL SSL_connect: SSL_ERROR_SYSCALL`). Therefore no build, unit/integration test, formatting, Clippy, rustdoc, dependency/advisory, fuzz, Miri, ALSA live, or external interoperability result is claimed.
+- `gh run list` shows recent `main` Actions runs from 2026-10-03 as failed: CI `37150170609`, Rust `37150170606`, rust-clippy `37150170607` / `37154774871`, and CodeQL `37150174063`. Fetching failed logs for `37150170609` returned `EOF`; the jobs API returned failed jobs with empty step arrays. Root cause is unknown. A billing lock was recorded earlier in project history but was not reverified as the cause of these runs.
+- Static workflow review found `.github/workflows/rust.yml` and `.github/workflows/rust-clippy.yml` remain generic duplicate build/lint workflows on `ubuntu-latest` without the explicit ALSA 1.2.13+ environment setup used by `.github/workflows/ci.yml`; reconcile or remove them after a human review of the intended required checks. CI YAML could not be parsed locally because no YAML parser is installed.
+- A one-off Python check of the PE output-queue capacity first exited with `NameError` because the script used `max_sysex` instead of `min_sysex`; corrected calculation passed: minimum property chunk 104 bytes, `OUT_CAP = 632`, worst-case 64 KiB response = 632 chunks. No source defect was implicated.
+- Repository-wide credential scan used targeted patterns over tracked working-tree files only; it is not a full Git-history secret scan. No candidate secret was found, so no rotation/history rewrite is indicated by this scan.
+
+### Findings / human decisions still open
+- **High — ALSA unbounded input:** `Sysex7Reassembler` appends incoming words until Complete/End without a maximum or inactivity timeout; sustained or unterminated input can grow memory. The control loop also drains input until empty without a per-tick budget or shutdown check inside that loop. Bound/reap messages and define a fairness budget before exposing it to untrusted input; the budget needs throughput/latency review.
+- **High when decoding untrusted data — zlib output bound:** optional `zlib_codec::decode` has no explicit decompressed-output limit. It is not wired into responder PE decoding today; define a cap/API before using it on peer-supplied compressed payloads.
+- **High — unbounded PE capability state:** `PeController::upsert_peer` appends one `PeerPe` row per unique source MUID with no configured count bound. Repeated unique capability inquiries can grow memory without a configured bound. A bounded admission/eviction policy may affect active transactions/subscriptions, so choose that public behavior before changing it and add a regression test.
+- **Medium — unbounded deferred management events:** `ResponderEngine::poll` moves all `CiEngine` events into `pending_events`, which has no explicit cap. If an application polls repeatedly without draining `next_event`, the queue can grow. A bounded/drop-oldest policy would lose app-facing events; choose explicit semantics before changing it.
+- **Medium — event/output loss observability:** `CiEngine` and `PeController` application-event queues and the PE output queue use bounded/drop-oldest behavior, but expose no loss counter/event. Confirm best-effort loss is acceptable or design explicit backpressure/telemetry.
+- **Human protocol decision — PE status 445:** ARD §7 maps busy to 445; the checked-in M2-103 Table 15 mapping recorded in `midici-pe/src/status.rs` assigns 343 to “Too Many Requests” and 445 a different meaning. Do not change public wire behavior until the spec owner resolves it.
+- **Human validation gates:** G1 management vectors and the constructed PE transcript still have no recorded human sign-off; G5 ALSA/external-peer interoperability is untested. Golden files remain unchanged.
+- **Deferred architecture:** the CLAP ring does not preserve variable-length payload size; there is no CLAP plugin/ABI/host integration or built-in `ChCtrlList`. Resolving the ring API and plugin architecture remains a human design decision.
+- **CI status:** no current green run exists for this review. Inspect the failed-run logs when available, determine the billing/account status, and reconcile the duplicate Rust/Rust-Clippy workflows before relying on CI results.
+
+### Labels and repository status
+- `gh issue list --state all` returned `[]`; no issue labels/statuses could be corrected. Repository labels are only the stock GitHub set. No labels were changed.
+- No PR existed before this review. The user requested a PR from `arena/01a105e2-midici`; create it only after committing and pushing this branch, then append the confirmed URL and check status below.
+
+### Next phase
+- Run the pinned Rust 1.97.1 build/test/fmt/Clippy/doc/deny suite and feature-gated fuzz/Miri checks in an authorized environment with ALSA 1.2.13+; inspect any new PR checks. Resolve the high/medium findings and human gates above before treating the stack as verified or merge-ready.

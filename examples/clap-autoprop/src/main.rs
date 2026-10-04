@@ -1,15 +1,13 @@
-//! CLAP auto-property demo plugin: control-thread Notify wiring.
+//! Control-thread helper and loopback tests for a future CLAP/PE integration.
 //!
-//! The full CLAP plugin (RT bridge + `ChCtrlList` from `clap_plugin_params`)
-//! is Phase 6 scope and still behind its own DoD gate. What ships here is the
-//! Phase 7 wiring contract the plugin binding calls into: when the host
-//! reports param value changes (`clap_plugin_params.flush` / timer path), the
-//! control thread calls [`flush_param_change`], which fans out PE
-//! `command: "partial"` updates to every subscribed peer.
+//! This package is not a CLAP plugin: it has no CLAP ABI, parameter enumeration,
+//! host timer, or integrated RT bridge. When an application reports parameter
+//! changes, the control thread can call [`flush_param_change`] to fan out PE
+//! `command: "partial"` updates to subscribed peers.
 //!
-//! RT contract: [`flush_param_change`] is **control-thread only**. The audio
-//! thread never touches the engine; it only moves bytes through the
-//! midici-transport-clap rings. // ARD §5 / §6; M2-103 §11
+//! [`flush_param_change`] is control-thread only. No audio callback is wired
+//! to the engine or to the current fixed-slot ring in this example.
+//! // ARD §5 / §6; M2-103 §11
 
 use midici_pe::{NotifyBody, ResponderEngine};
 use rand_core::RngCore;

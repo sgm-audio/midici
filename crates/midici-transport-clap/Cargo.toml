@@ -1,6 +1,6 @@
 [package]
 name = "midici-transport-clap"
-description = "CLAP plugin transport adapter with RT-safe bridge for midici"
+description = "Fixed-slot SPSC ring primitive for a future midici CLAP transport"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

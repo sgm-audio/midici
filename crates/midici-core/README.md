@@ -1,57 +1,46 @@
 # midici-core
 
-Sans-io MIDI-CI state machines. Zero I/O, deterministic, `no_std` + alloc capable.
+Sans-I/O MIDI-CI wire codecs and a management responder state machine. The crate supports `no_std` + `alloc`; it has no transport I/O.
 
-## What it does
+## Current implementation
 
-- **Discovery / Reply-to-Discovery** — identity, capability bits, max SysEx size, output path ID
-- **MUID lifecycle** — 28-bit random MUID generation, collision detection, Invalidate MUID
-- **ACK / NAK** — typed status codes, ACK flow control
-- **Endpoint Inquiry/Reply** — Product Instance ID (inquiry-only)
-- **PE wire types** — `PeCapabilities` codec + generic chunked `PeMessage` framing (payload stays opaque; PE logic lives in `midici-pe`)
-- **Engine API** — `feed_sysex()`, `poll(now)`, `next_outbound()`, `next_event()`
-- **Version handling** — v1.2 advertised, v1.1 peers feature-masked (`allow_ack` / `allow_endpoint`); never NAK on version alone
+- **Discovery / Reply to Discovery** — identity, category bits, max SysEx size, and output path fields.
+- **MUID lifecycle** — injected RNG, peer records, collision handling, and Invalidate MUID.
+- **ACK / NAK** — codecs, outbound ACK helper for known v1.2 peers, inbound NAK events. Inbound ACK is decoded and discarded; a general ACK/flow-control transaction system is not implemented.
+- **Endpoint messages** — codecs and an outbound Endpoint Inquiry helper exist, but the responder answers an incoming Endpoint Inquiry with `NotSupported` and ignores incoming Endpoint Reply.
+- **PE wire types** — PE Capabilities and generic PE-message framing; PE handling is in `midici-pe`.
+- **Engine API** — `feed_sysex`, `poll`, `next_outbound`, and `next_event`.
 
-## Who should use this
+The default `CiConfig` advertises Property Exchange only. Applications can set other category bits, but `CiEngine` does not validate those bits against implemented handlers. Profile Configuration and Process Inquiry are not implemented.
 
-- Transport adapter authors (ALSA, CLAP, CoreMIDI, Windows MIDI Services)
-- Anyone building a MIDI-CI initiator or responder from scratch
-- Test harnesses needing deterministic protocol simulation
+## Minimal use
 
-## Key types
+```rust,ignore
+use midici_core::{CiConfig, CiEngine, DeviceIdentity};
 
-```rust
-use midici_core::{CiConfig, CiEngine, CiEvent, Muid, OutboundSysex};
-
-// Configure
+let identity = DeviceIdentity {
+    manufacturer: [0x7D, 0, 0],
+    family: 1,
+    model: 2,
+    software_revision: [1, 0, 0, 0],
+};
 let cfg = CiConfig::responder_default(identity);
 let mut engine = CiEngine::new(cfg, rng);
 
-// Feed inbound SysEx (F0/F7 stripped)
+// Feed a complete SysEx7 body with F0/F7 stripped.
 engine.feed_sysex(group, body)?;
-
-// Drive timeouts (call at >= 10 Hz)
 engine.poll(now_ms);
-
-// Drain outbound SysEx (already chunk-split)
 while let Some(out) = engine.next_outbound() {
     transport.send(out.group, &out.body);
 }
-
-// Drain application events
-while let Some(ev) = engine.next_event() {
-    handle(ev);
+while let Some(event) = engine.next_event() {
+    handle(event);
 }
 ```
 
+`CiEngine::poll` accepts a timestamp but currently does not store or use it, and has no management timeout/retry behavior. PE reassembly timers are driven by `midici_pe::ResponderEngine::poll`. Management messages are not PE-chunked; PE response chunking is implemented in `midici-pe`.
+
 ## Dependencies
 
-- `rand_core` — MUID generation with injected RNG
-
-(`midi2` is used by the transports, not by core.)
-
-## No dependencies on
-
-- async runtimes
-- std (works with `no_std` + alloc)
-- logging, locks, or syscalls on hot paths
+- `rand_core` — deterministic MUID generation with an injected RNG.
+- No transport, async-runtime, logging, or OS-I/O dependency.

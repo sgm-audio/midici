@@ -7,7 +7,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use midici_core::spec::{
-    is_pe_sub_id, DEVICE_ID_FUNCTION_BLOCK, MESSAGE_FORMAT_VERSION_1_2,
+    is_pe_sub_id, CI_HEADER_LEN, DEVICE_ID_FUNCTION_BLOCK, MESSAGE_FORMAT_VERSION_1_2,
     PE_DEFAULT_SIMULTANEOUS_REQUESTS, PE_VERSION_MAJOR, PE_VERSION_MINOR, SUB_ID2_PE_CAPS_INQUIRY,
     SUB_ID2_PE_CAPS_REPLY, SUB_ID2_PE_GET_INQUIRY, SUB_ID2_PE_GET_REPLY, SUB_ID2_PE_NOTIFY,
     SUB_ID2_PE_SET_INQUIRY, SUB_ID2_PE_SET_REPLY, SUB_ID2_PE_SUBSCRIPTION,
@@ -17,8 +17,8 @@ use midici_core::{
     pe_caps_reply, CiError, CiHeader, Muid, OutboundSysex, PeCapabilities, PeMessage,
 };
 
-use crate::chunker::split;
-use crate::frame::PeChunk;
+use crate::chunker::{split, MAX_SYSEX_MIN};
+use crate::frame::{PeChunk, PE_FRAMING_LEN};
 use crate::json_header::{
     encode_reply_header, encode_sub_reply_header, encode_subscription_header,
     parse_get_inquiry_header, parse_notify_header, parse_set_inquiry_header,
@@ -31,7 +31,11 @@ use crate::resource::PeQuery;
 use crate::status::PeStatus;
 use crate::subscriptions::{SubId, SubscriptionTable};
 
-const OUT_CAP: usize = 64;
+// Enough slots for one maximum-sized PE response at the minimum negotiated
+// SysEx size, including a conservative allowance for a zero-capacity first chunk.
+const MIN_CHUNK_PROPERTY_CAPACITY: usize =
+    MAX_SYSEX_MIN as usize - 2 - CI_HEADER_LEN - PE_FRAMING_LEN;
+const OUT_CAP: usize = MAX_TX_BYTES / MIN_CHUNK_PROPERTY_CAPACITY + 2;
 const EVENT_CAP: usize = 64;
 
 /// Chunked PE inquiry kind (the three request/response pairs). // M2-101 §8.7–§8.12

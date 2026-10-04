@@ -25,33 +25,22 @@
     simply does not exist in the API surface.
 12. Conventional Commits (feat/fix/chore/docs/test/refactor). PR-sized branches; merge to main
     only with CI green.
-13. All commands run inside distrobox `midici-dev`. Never modify the host OS.
+13. Run commands inside the project's designated isolated development environment where available (historically, distrobox `midici-dev`). If a managed checkout does not provide that environment or required tooling, do not install packages or modify the host OS without authorization; record the missing tools and attempted checks in `docs/PROGRESS.md`.
 14. rustfmt + clippy -D warnings are gates, not suggestions.
 
 ## Definition-of-done protocol
 15. A phase's DoD is a list of shell commands. Done = all exit 0 AND outputs pasted in
  PROGRESS.md. Screenshots of green CI are not a substitute for local command output.
 
-## Cursor Cloud specific instructions
-- Environment: the Cursor Cloud VM is **Ubuntu 24.04**, not the Fedora `distrobox midici-dev`
-  described in rule 13. That distrobox does **not** exist here — run `cargo`/`rustfmt`/`clippy`
-  directly on the host. The pinned toolchain (`rust-toolchain.toml` → stable `1.97.1`, with
-  `rustfmt`+`clippy`) is managed by `rustup` and auto-installs on the first `cargo` call.
-- System deps: `libasound2-dev` + `alsa-utils` + `pkg-config` are pre-installed for the planned
-  ALSA transport (ARD §2/§9). No committed crate links ALSA yet, so builds do not require them today.
-- Cargo dependencies download from crates.io at build time; the startup update script runs
-  `cargo fetch` to pre-warm them. No other refresh step is needed.
-- **Fixed in Phase 7:** the `crates/midici-transport-clap` breakage above is resolved —
-  `ring.rs` uses `[[u8; B]; N]` (stable), the `wrap_around` test logic bug is fixed, and a
-  genuine SPSC race (pop exposing an already-published slot) is fixed via
-  `Consumer::peek()`/`Consumer::commit()`. Whole-workspace commands and miri now pass.
-- WSL environment used in Phase 7 (this host had no `distrobox`/Cursor-Cloud VM): WSL
-  Ubuntu (`wsl -d Ubuntu`), rustup stable 1.97.1 auto-pinned, vendored `libasound2t64`
-  extracted to `~/alsa` + minimal `~/bin/pkg-config` shim (no root); cargo runs use
-  `RUSTFLAGS="-L /home/scott/alsa/usr/lib/x86_64-linux-gnu -C link-args=-Wl,-rpath,…"`.
-- To build/test the crates that DO compile (the real protocol surface), scope commands, e.g.:
-  `cargo test -p midici-core -p midici-pe -p midici-conformance -p midici-responder -p midici-transport-alsa`
-  and `cargo clippy` / `cargo run` on the same set. `examples/virtual-responder` and
-  `examples/clap-autoprop` are placeholder binaries that just print `name version` today.
-- Optional extras: `midici-pe` has a `zlib` feature (`--all-features`); the `crates/midici-pe/fuzz`
-  targets need `cargo +nightly` + `cargo-fuzz` (not installed by default).
+## Historical environment and phase notes
+
+The following notes describe earlier Cursor Cloud/WSL runs, not guaranteed tooling in every checkout. `docs/PROGRESS.md` is the current verification record; re-check the actual environment before relying on old results.
+
+- Earlier planned Cursor Cloud environment: Ubuntu 24.04, with the pinned stable 1.97.1 toolchain managed by rustup. The Fedora `midici-dev` distrobox described in rule 13 was unavailable in that environment.
+- The workspace now includes `midici-transport-alsa`, which links `alsa-sys` and requires ALSA development files/library with UMP sequencer APIs (the CI image uses ALSA 1.2.13+), plus `pkg-config` and a C toolchain.
+- Cargo dependencies are fetched from crates.io during builds; network access may be needed if they are not cached.
+- **Phase 7 historical result:** the CLAP ring's flat storage and wrap-around logic were fixed, and its consumer API changed to `peek()`/`commit()` to avoid publishing a slot before reading it. Historical workspace/Miri results are in `docs/PROGRESS.md`; the current ring still has the documented missing payload-length metadata, and this review's new commit-guard test was not run locally.
+- A previous Phase 7 WSL run used vendored ALSA packages and a local `pkg-config` shim. Those host-specific paths and flags are not current setup instructions.
+- Suggested focused test scope when Rust/ALSA tooling is available: `cargo test -p midici-core -p midici-pe -p midici-conformance -p midici-responder -p midici-transport-alsa`, followed by the corresponding clippy commands.
+- `examples/virtual-responder` is an ALSA responder daemon. `examples/clap-autoprop` is a PE helper/test harness, not a loadable CLAP plugin.
+- Optional extras: `midici-pe` has a `zlib` feature; the two fuzz targets under `crates/midici-pe/fuzz` need nightly Rust and `cargo-fuzz`.

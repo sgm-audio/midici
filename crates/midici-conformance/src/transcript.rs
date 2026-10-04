@@ -53,10 +53,10 @@ pub struct ExchangeTranscript {
 /// - `CAPS <hex u8>`
 /// - `FB <hex u8>`
 /// - `PATH <hex u8>`
-/// - `GROUP <u8>` default inbound/outbound UMP group for subsequent steps
+/// - `GROUP <u8>` sets the default inbound/outbound UMP group for following steps
 /// - `IDENTITY <m0> <m1> <m2> <family> <model> <r0> <r1> <r2> <r3>` (decimal family/model)
-/// - `> [group] <hex...>` inbound
-/// - `< [group] <hex...>` expected outbound
+/// - `> <hex...>` inbound on the current group
+/// - `< <hex...>` expected outbound on the current group
 /// - `POLL <now_ms>`
 /// - `XTEST` — register the canned writable/subscribable `X-Test` resource (Phase 7)
 pub fn parse_transcript(name: &str, text: &str) -> Result<ExchangeTranscript, String> {

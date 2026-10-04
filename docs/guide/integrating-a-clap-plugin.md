@@ -3,14 +3,7 @@
 **Goal (ARD §5):** a CLAP plugin exposes `ChCtrlList` over Property Exchange so
 a CI-capable controller/host auto-maps its parameters. No MIDI-learn.
 
-> Status note (per AGENTS honesty rules): the **PE machinery is complete**
-> (Set, subscriptions, Notify fan-out, tested at the wire level) and
-> `examples/clap-autoprop` ships the control-thread entry point
-> `flush_param_change`. The CLAP plugin binary itself (entry point vtable,
-> `clap_plugin_params`, `ChCtrlList` builder, RT event bridge) is the Phase-6/8
-> follow-up. This guide describes the finished wiring as it is designed and
-> partially implemented; the walkthrough below marks what exists vs. what lands
-> with the plugin binding.
+> **Current status:** PE Get/Set/subscription and update code exists with in-repository tests, but this does not establish full specification conformance. `examples/clap-autoprop` contains a control-thread helper and a test-only `ChCtrlList` stand-in; its binary is not a CLAP plugin. There is no CLAP ABI/event binding, parameter-derived resource, or integrated RT bridge. The walkthrough below separates code that exists from design sketches.
 
 ## The Flow
 
@@ -72,14 +65,14 @@ let n = flush_param_change(&mut engine, "ChCtrlList", br#"{"/gain":0.5}"#);
 ```
 
 `flush_param_change` calls `ResponderEngine::notify_resource_changed` with
-`NotifyBody::Partial(body)`. The engine looks up every subscriber of the
-resource, assigns a request id, chunks to the negotiated max SysEx per peer,
-and queues the wire bytes. All PE/JSON work is in `midici-pe`; the audio
-thread only moves ring bytes.
+`NotifyBody::Partial(body)`. The engine looks up subscribers of the resource,
+assigns a request id, chunks to the negotiated/clamped max SysEx per peer, and
+queues the wire bytes. This helper and its PE loopback test exist; there is no
+CLAP audio callback or host timer invoking them in this repository.
 
-The autoprop crate's unit tests exercise this end to end
+The example's unit tests exercise the control-thread PE path
 (`subscribed_peer_receives_partial_notify_on_flush`), including the no-op case
-when nobody subscribed.
+when nobody subscribed. They do not load a plugin or test CLAP host behavior.
 
 ### 3. Notify semantics (M2-103 §11)
 
@@ -90,7 +83,7 @@ when nobody subscribed.
 
 If the update does not fit one chunk, prefer `notify` (M2-103 §11.1.1).
 
-## Landing with the plugin binding (Phase 6/8)
+## Future work — not present in this release
 
 - `clap-autoprop` `libclap_autoprop.so` + `clap-validator` run
 - `clap_plugin_params` walk → `ChCtrlList` entries (`title`, `ctrlType`,
@@ -98,6 +91,4 @@ If the update does not fit one chunk, prefer `notify` (M2-103 §11.1.1).
 - RT ring bridge (`midici-transport-clap` `Ring`) wired to CLAP MIDI events
 - Host timer (`clap_host_timer`, 10 ms) driving `engine.poll` + ring drain
 
-Once the binary lands, the demo (`docs/media/autoprop.cast`, G9a) records:
-build → load in a CLAP host → watch Discovery → Get ChCtrlList → Subscribe →
-updates on param changes.
+The repository currently has no plugin binary, `ChCtrlList` builder, or demo recording. Do not describe this flow as an available demo until those artifacts and host-validation evidence exist.

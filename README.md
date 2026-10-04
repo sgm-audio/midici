@@ -1,88 +1,63 @@
 # midici
 
-Rust MIDI-CI / Property Exchange responder stack.
+`midici` is a Rust MIDI-CI responder stack. The 0.1.0 workspace contains a sans-I/O management engine, a Property Exchange responder, a Linux ALSA UMP adapter, and a small SPSC ring primitive intended for a future CLAP adapter.
 
-**Why MIDI 2.0 Matters Now**: MIDI 1.3 launched 2020; 4 years later, zero open-source control-plane tooling exists. Every DAW, plugin, and synth now speaks MIDI 2.0 natively — the missing piece is the *property exchange layer* that lets software discover, negotiate, and configure capabilities at runtime. midici is the only Rust-based PE responder stack that doesn't drag a C++/Python bridge. Zero-cost abstraction + compile-time capability negotiation.
+> **Scope:** this is a partial responder implementation, not a complete MIDI-CI/Property Exchange implementation or a claim of hardware interoperability. The current limitations and unverified protocol decisions are listed below and in [`docs/guide/spec-coverage.md`](docs/guide/spec-coverage.md).
 
-**Getting Started**:
-1. `cargo build --workspace --features pe` (builds the PE-enabled surface)
-2. `cargo run --example discover` — prints the property bag from a Discovery exchange
-3. See `examples/clap-autoprop/` for the killer demo: `ChCtrlList` auto-mapped from `clap_plugin_params`
+## What is implemented
 
-**API Reference** (sans-io contract, v1 ships all):
+- **`midici-core`** — MIDI-CI wire codecs and a responder state machine for Discovery, peer/MUID lifecycle, Invalidate, ACK/NAK, and version handling. Endpoint Inquiry/Reply codecs exist, but an incoming Endpoint Inquiry currently receives `NotSupported`; Profile Configuration and Process Inquiry are not implemented.
+- **`midici-pe`** — PE Capabilities, chunked Get/Set, subscription start/end, outbound subscription updates, resource handlers, JSON headers, and bounded chunk reassembly. The default registry provides `DeviceInfo` and `ResourceList`; applications can register their own `PropertyResource` implementations.
+- **`midici-transport-alsa`** — Linux ALSA sequencer UMP endpoint setup, SysEx7 packet conversion, and a 10 ms responder control loop. It needs ALSA development files and an ALSA library providing the UMP sequencer APIs (1.2.13 or newer).
+- **`midici-transport-clap`** — a fixed-slot, SPSC ring with two-phase consumption. It does **not** provide CLAP ABI/event bindings, a plugin, or a complete SysEx bridge.
+- **Examples** — `virtual-responder` is an ALSA UMP responder daemon. `clap-autoprop` is a control-thread helper/test harness; it is not a loadable CLAP plugin and does not construct a `ChCtrlList` resource from plugin parameters.
 
-- `CiEngine::new(cfg, rng)` — owns MUID, peers, transactions
-- `engine.feed_sysex(group, body)` — feed one complete inbound SysEx7 body (F0/F7 stripped), tagged with UMP group
-- `engine.poll(now)` — drive timeouts. Call at >= 10 Hz. `now` is monotonic millis.
-- `engine.next_outbound()` — drain outbound SysEx bodies (already chunk-split to negotiated max size)
-- `engine.next_event()` — drain application-facing events
+The core and PE crates are `no_std` + `alloc` capable. The transport and example crates use `std`.
 
-**CiEvent** variants:
-- `PeerDiscovered { muid, info, caps }`
-- `PeerInvalidated { muid }`
-- `PropertyGet { peer, request, resource }`
-- `PropertySet { peer, request, resource, body }`
-- `SubscribeStart { peer, resource, sub }`
-- `SubscribeEnd { peer, sub }`
-- `Nak { peer, original, code }`
+## Known limitations and open decisions
 
-**Core Protocol Coverage** (from ARD-001 §4):
+- **No full protocol coverage.** Profile messages and Process Inquiry are not implemented. Endpoint Inquiry is not positively answered. The `CiEngine`'s `poll` currently has no management timers; the PE responder uses polling for PE reassembly timeouts and peer-state cleanup.
+- **PE encodings are not negotiated by the responder.** ASCII/7-bit JSON is the active path. Mcoded7 and zlib codec functions are available separately (`zlib` feature), but the engine does not apply them to Get/Set payloads or negotiate `mutualEncoding`.
+- **No built-in `ChCtrlList`.** PE can serve an application-provided resource, but automatic CLAP parameter mapping is not implemented.
+- **PE capability state has no configured peer-count bound.** `PeerPe` rows grow for unique PE capability sources; choose an admission/eviction policy before relying on this responder with untrusted peers.
+- **CLAP ring is not yet a SysEx transport.** Slots are zero-padded to a fixed size and the ring does not preserve each input's actual length; do not use it for variable-length SysEx without a length/framing API.
+- **ALSA inbound SysEx reassembly is not bounded.** An unterminated or excessively large UMP SysEx sequence can grow memory without a maximum length or timeout; do not expose this path to untrusted input until bounded reassembly is added.
+- **Queues have overload policies.** The PE output queue now has room for one maximum-sized response at the minimum SysEx size, but aggregate overload evicts the oldest queued output. `CiEngine` and PE application-event queues are bounded and discard oldest entries on overflow without a drop counter/event. By contrast, `ResponderEngine`'s deferred management-event queue has no explicit bound; applications should drain it regularly.
+- **Status 445 needs a human protocol decision.** The ARD maps the simultaneous-request limit to 445, while the checked-in M2-103 table and implementation comments record a conflicting meaning. See [`docs/PROGRESS.md`](docs/PROGRESS.md) and the review report before changing this mapping.
+- **Interoperability/performance claims are unverified.** [`docs/INTEROP.md`](docs/INTEROP.md) is an evidence ledger; blank cells mean “not tested,” not success. Checked-in golden messages/transcripts are constructed deterministic fixtures, not packet captures from external tools or hardware. No 24-hour soak or enforced no-allocation gate is present in the repository.
 
-*Management (v1 ships all)*:
-- `0x70` Discovery / `0x71` Reply — identity, capability bits (Profiles `0x04`, PE `0x08`, Process Inquiry `0x10`), max SysEx size (≥128), output path ID
-- `0x7D` ACK · `0x7E` Invalidate MUID · `0x7F` NAK (with status codes)
-- `0x72/0x73` Endpoint (Name/ProductInstanceId) — ship; cheap and hosts query it
+## Build and test
 
-*Property Exchange (v1 ships all)*:
-- `0x30/0x31` PE Capabilities (negotiates `numSimultaneousRequests`, PE version)
-- `0x34/0x35` Get / `0x36/0x37` Set (with `status`: 200/202/341/400/403/404/405/413/445 subset)
-- `0x38/0x39` Subscription · `0x3F` Notify
-- Encodings: ASCII, `Mcoded7`, `zlib+Mcoded7` (feature-gated)
-- Chunking: `requestId` (7-bit) correlation, `numChunks`/`chunkNum` 14-bit fields, header-in-first-chunk rule
+The workspace toolchain is pinned in [`rust-toolchain.toml`](rust-toolchain.toml) (Rust 1.97.1). On Linux, install `pkg-config`, a C toolchain, and ALSA development headers/library with the UMP sequencer APIs (ALSA 1.2.13+).
 
-*Profiles (v1 = polite refusal)*: `0x20/0x21` Inquiry/Reply reporting zero profiles; everything else NAKs with "not supported." Full profile support is v2.
+```sh
+cargo build --workspace
+cargo test --workspace
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo doc --workspace --no-deps
+cargo deny check
+```
 
-*Version handling*: advertise CI v1.2; accept v1.1 peers by masking v1.2-only features (ACK usage, Endpoint messages) per the `ci ver` byte. Never NAK on version alone.
+These commands are the local verification entry points; see [CI](.github/workflows/ci.yml) for the configured jobs. Fuzz targets are separate and require nightly Rust plus `cargo-fuzz`; the only checked-in targets are `fuzz_mcoded7` and `fuzz_reassemble` under `crates/midici-pe/fuzz/`.
 
-**Property Resources** (from ARD-001 §5):
-- `DeviceInfo` — manufacturer/family/model/version/serial
-- `ResourceList` — auto-generated from the registry
-- `ChCtrlList` — entries: `title`, `ctrlType` (`"cc" | "rpn" | "nrpn" | "pnac" | "pnp"`), `ctrlIndex`, `channel`, `minMax`, `default`, plus link metadata. v1 emits per-channel CC/RPN maps; per-note controller types included where the synth supports them.
+## Run the ALSA responder
 
-**clap-autoprop flow (killer demo)**:
-1. Main thread walks `clap_plugin_params` → builds `ChCtrlList` entries (param id → assigned controller, range mapped from `clap_param_info`)
-2. Controller/host does Discovery → PE Get `ResourceList` → Get `ChCtrlList` → auto-maps knobs. Zero manual MIDI-learn.
-3. Param changes flush through `clap_host_params` → subscription `Notify` to subscribed peers.
+```sh
+cargo run -p virtual-responder -- --help
+cargo run -p virtual-responder -- --device-name midici --endpoint-name midici-responder
+```
 
-**Threading & RT Contract** (from ARD-001 §6):
+The first command prints CLI help. The second opens the ALSA sequencer endpoint and runs until interrupted; it requires a usable `/dev/snd/seq` and appropriate device permissions. The daemon currently logs management `CiEvent`s; it does not expose PE application events through its CLI.
 
-- **Audio thread**: move bytes only. No parsing, no JSON, no allocation, no locks, no logging.
-- **CLAP adapter, RT side**: `clap_process` copies inbound SysEx event bytes into a wait-free SPSC ring (`rtrb`, 64 slots × 512 B default, tunable). Pops the outbound ring and emits CLAP MIDI events. Overflow policy: drop-with-counter.
-- **Control thread**: host timer (10 ms period) drives `engine.poll(now)`, drains rings, runs all state machines and JSON.
-- **Reassembly buffers**: pre-reserved, capped at 64 KiB per (peer, requestId), max 4 concurrent per peer, LRU-evicted on timeout. DoS guard.
-- **Verification**: `assert_no_alloc` wraps the RT path in debug; loom/miri pass on the ring wrapper.
+## Repository map
 
-**Build Order** (from ARD-001 §9):
-1. **Slice 0** — plumbing: virtual ALSA UMP endpoint up; `aseqdump` shows traffic
-2. **Slice 1** — `midici-core`: Discovery + ACK/NAK + MUID lifecycle against Workbench
-3. **Slice 2** — PE Capabilities + Get for `DeviceInfo`/`ResourceList` (chunker + Mcoded7)
-4. **Slice 3** — `clap-autoprop` — `ChCtrlList` from `clap_plugin_params`, CLAP RT bridge. ← announce here; this is the demo video.
-5. **Slice 4** — Set + Subscriptions + Notify.
-6. **v2** — initiator role, Profiles (DAW Ctrl), `State` resource, CoreMIDI/WMS transports.
-
-**Test Strategy** (from ARD-001 §8):
-- **Property tests** (proptest): Mcoded7 round-trip; chunk-split/reassemble round-trip at every negotiated size 128–4096; MUID lifecycle model test.
-- **Fuzzing** (cargo-fuzz): SysEx framing, CI header parse, PE JSON header, reassembler. Gate: 10⁸ execs clean before 0.1.
-- **Golden transcripts**: captured Discovery/PE exchanges checked into `midici-conformance` (sources: MIDI 2.0 Workbench, Wireshark UMP dissector pcaps from midi2.dev tooling). Replayed byte-exact in CI.
-- **RT audit**: `assert_no_alloc` + miri on ring path; 24 h soak of discovery churn (peer appear/vanish loop) with zero growth (heaptrack).
-- **Interop matrix** (definition of done for 0.1):
-  - MIDI 2.0 Workbench: full Discovery + PE Get suite passes
-  - Bitwig on Linux (only Linux DAW with usable UMP today): discovers responder, reads DeviceInfo
-  - Windows MIDI Services console tooling: enumerates + Endpoint Name reads
-  - Hardware (when available — Keystage-class PE controller): ChCtrlList auto-map demo
-
-**Perf gates**: loopback Discovery < 100 ms; 4 KiB PE Get < 50 ms; RT path ≤ 2 memcpys/event, zero alloc.
-
----
-
-See `AGENTS.md` for agent build rules and `docs/ARD-001.md` for the full architecture reference.
+- `crates/midici-core` — management state machine and wire codecs
+- `crates/midici-pe` — PE controller, resource registry, chunker/reassembler, codecs
+- `crates/midici-responder` — re-export façade
+- `crates/midici-transport-alsa` — Linux UMP sequencer adapter
+- `crates/midici-transport-clap` — SPSC ring primitive only
+- `crates/midici-conformance` — constructed goldens, transcript replay, loopback tests
+- `docs/specs/` — checked-in MIDI 2.0 specification PDFs
+- `docs/guide/spec-coverage.md` — implementation status by area
+- `docs/PROGRESS.md` — append-only engineering and verification record

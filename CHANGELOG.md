@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -10,63 +10,49 @@ This file is generated from the conventional-commit history with `git-cliff`
 
 ## [Unreleased]
 
-### Added
-- Phase 4: PE Capabilities + Get pipeline with typed `PeStatus` (200/341/400/403/404/405/413/445)
-- Phase 4: Resource registry with `DeviceInfo`, `ResourceList`
-- Phase 4: JSON header parser with depth/size limits; malformed → 400 never panics
-- Phase 4: Dual-engine loopback tests (max SysEx 128 + 4096) + NAK matrix + golden transcript
-- Phase 5: ALSA UMP transport (`midici-transport-alsa`) with virtual endpoint
-- Phase 5: `virtual-responder` daemon with CLI, structured logging, SIGINT shutdown
-- Phase 6: CLAP transport core (`midici-transport-clap`): wait-free SPSC ring (miri-verified)
-- Phase 7: PE Set + SetReply with per-resource write policy (default 405 NotAllowed)
-- Phase 7: PE Subscriptions — start/end, responder-allocated `SubId`, `partial`/`full`/`notify`
-  updates on `0x38`, auto-notify after Set on a subscribed resource (M2-103 §11)
-- Phase 7: Subscriptions tied to peer MUID liveness — Invalidate/vanish reaps them
-  (M2-103 §11.5 / ARD §7)
-- Phase 7: `PeEvent` channel (`PropertySet`/`SubscribeStart`/`SubscribeEnd`) and
-  `clap-autoprop` control-thread `flush_param_change` wiring with wire-level tests
-- Phase 7: conformance coverage — `XTestResource`, Set status matrix
-  (200/403/404/405), lifecycle tests, golden `05-pe-set-subscribe.transcript`
-- Phase 9: Documentation — rustdoc on all public items (doc CI denies warnings),
-  compiling doctests, per-crate READMEs, guide set under `docs/guide/`, arch diagram,
-  spec-coverage table with honest gaps
-- Documentation: crate READMEs, architecture guide, integration guide, RT contract, spec coverage
-
 ### Fixed
-- Phase 6: `forbid(unsafe_code)` → `deny` at workspace level so FFI crates can allow
-- Phase 6: `Ack` encode/decode for Message Format Version 1.1 (header-only parity with NAK)
-- Phase 6: Discovery rejects `max_sysex_size < 128` per M2-101 §5.5.3
-- Phase 6: Peer table full → status 341 (not busy/445)
-- Phase 7: `ring.rs` stable layout (`[[u8; B]; N]`); SPSC race — `Consumer::pop` published
-  read_idx before returning the slice; fixed via `peek`/`commit` (miri-clean)
-- Phase 7: `wrap_around` ring test logic (dropped 96 items, then expected index 0)
+- Validate 7-bit requirements for fixed MIDI-CI header fields and PE property bytes.
+- Normalize a zero configured management peer limit before peer insertion.
+- Preserve destination/version handling for PE messages; route reserved CI versions and unknown PE Sub-ID#2 values through the management NAK path.
+- Reject PE chunks outside the declared total or reserved fragment bound, and clear active slots on reassembly consistency/cap errors.
+- Size the PE outbound queue to hold one maximum-size response at the minimum SysEx size.
+- Refresh the generated ResourceList after normal custom-resource registration.
+- Ignore consumer-ring commits without an uncommitted successful peek.
+- Release ALSA sequencer handles on setup errors and validate endpoint/client names before allocating ALSA resources.
 
-## [0.1.0] - 2026-07-23
+### Tests added
+- Regression coverage for 7-bit header/property validation, zero peer limits, out-of-range PE chunks, ResourceList refresh, PE destination/version/unknown-sub-ID routing, large PE replies, ring commit misuse, and ALSA NUL-name validation.
 
-**First milestone of the midici stack.** Sans-io MIDI-CI Management core
-(Discovery/Reply, MUID lifecycle incl. collision handling, ACK/NAK, Endpoint
-inquiry, v1.1/v1.2 version masking), PE plumbing foundations (Mcoded7, chunker,
-DoS-capped reassembler with fuzz coverage), engine determinism tests, and
-constructed golden transcripts pending human review (G1). Responder-only scope
-per ARD-001.
+### Documentation
+- Rewrote implementation and conformance status claims to distinguish implemented code, design targets, and unverified interoperability.
+- Corrected the published 0.1.0 release date and moved the already-released feature set into its release entry.
+
+> The changes in this Unreleased section have not been built or tested in the current review environment: Cargo/Rust tooling is unavailable. See `docs/PROGRESS.md` for exact attempted commands and remaining human decisions.
+
+## [0.1.0] - 2026-09-25
+
+**First published release of the midici stack.** Responder-only scope per ARD-001. The checked-in golden vectors/transcripts are constructed deterministic fixtures, with human review still pending (G1); they are not external packet captures.
 
 ### Added
-- Initial workspace scaffold per ARD-001
-- Cargo workspace with 6 crates + 2 examples
-- CI workflow (fmt, clippy, test, doc, cargo-deny)
-- `docs/specs/` with M2-101, M2-103, M2-104 PDFs
-- Phase 0: Bootstrap environment (Fedora 42 `midici-dev` container)
-- Phase 1: Management framing (Discovery, Reply, Endpoint, ACK, NAK, Invalidate MUID)
-- Phase 1: Management goldens (constructed, listed in VERIFY.md for human review)
-- Phase 2: PE encodings + chunking (Mcoded7, zlib+Mcoded7, chunker, reassembler)
-- Phase 2: Fuzz targets (`fuzz_mcoded7`, `fuzz_reassemble`) — 10⁶ execs clean
-- Phase 3: `CiEngine` sans-io (feed_sysex, poll, next_outbound, next_event)
-- Phase 3: MUID lifecycle, collision, invalidation, v1.1 feature masking
-- Phase 3: Golden transcript replay (Discovery, collision)
+- Initial workspace with six crates and two examples; MIDI 2.0 specification PDFs checked in under `docs/specs/`.
+- Sans-I/O MIDI-CI management core for Discovery/Reply, MUID lifecycle/collision handling, Invalidate, ACK/NAK, and version handling.
+- Management codecs for Endpoint Inquiry/Reply; incoming Endpoint Inquiry returns `NotSupported` (positive Product Instance ID response deferred).
+- PE Capability/Get pipeline, resource registry (`DeviceInfo`, `ResourceList`), typed response status subset, JSON header limits, chunker, Mcoded7 codec, and bounded reassembler.
+- PE Set, subscriptions, subscription updates, peer-liveness cleanup, PE events, and the `clap-autoprop` control-thread helper with loopback tests. The helper is not a loadable CLAP plugin and there is no built-in `ChCtrlList`.
+- Linux ALSA UMP sequencer adapter and `virtual-responder` daemon.
+- Fixed-slot SPSC ring primitive in `midici-transport-clap`; this is not a complete CLAP adapter.
+- Constructed management goldens and deterministic exchange transcripts, model/loopback/property tests, and fuzz targets `fuzz_mcoded7` / `fuzz_reassemble`.
+- CI workflows for formatting, clippy, workspace tests, docs, cargo-deny, link checking, and 60-second-per-target fuzz smoke.
+- Architecture, transport, RT-target, integration, verification, and implementation-status documentation.
 
 ### Changed
-- Phase 3: Endpoint Inquiry Reply NAKs NotSupported (Product Instance ID deferred)
+- `CiEngine::poll` is a no-op for management timers; the PE responder drives PE reassembly timeout and peer cleanup from `ResponderEngine::poll`.
+- PE status 445 remains an unresolved human protocol decision: the ARD's busy mapping conflicts with the meaning recorded in M2-103 Table 15. See `docs/PROGRESS.md`.
+
+### Verification recorded for 0.1.0
+- Historical workspace, lint, documentation, dependency, fuzz-smoke, and Miri results are recorded in `docs/PROGRESS.md`.
+- Live ALSA/external interoperability evidence and human golden review remain pending in `docs/INTEROP.md` and `docs/VERIFY.md`.
 
 ---
 
-**Note:** This changelog is generated from conventional commits via `release-plz`/`git-cliff`. The 0.1.0 summary above is hand-edited; subsequent entries will be auto-generated.
+**Note:** release notes are hand-curated from the project history; they are not a claim that every deferred ARD item shipped.

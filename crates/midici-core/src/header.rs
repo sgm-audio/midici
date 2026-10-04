@@ -30,6 +30,9 @@ impl CiHeader {
         if body[0] != UNIVERSAL_NON_REALTIME {
             return Err(CiError::NotUniversalSysex);
         }
+        if body[1..5].iter().any(|b| *b > 0x7F) {
+            return Err(CiError::BadField);
+        }
         if body[2] != SUB_ID1_MIDI_CI {
             return Err(CiError::NotMidiCi);
         }
@@ -55,6 +58,9 @@ impl CiHeader {
         if out.len() < CI_HEADER_LEN {
             return Err(CiError::BufferTooSmall);
         }
+        if self.device_id > 0x7F || self.sub_id2 > 0x7F || self.version > 0x7F {
+            return Err(CiError::BadField);
+        }
         out[0] = UNIVERSAL_NON_REALTIME;
         out[1] = self.device_id;
         out[2] = SUB_ID1_MIDI_CI;
@@ -70,6 +76,35 @@ impl CiHeader {
 mod tests {
     use super::*;
     use crate::spec::{MESSAGE_FORMAT_VERSION_1_2, SUB_ID2_DISCOVERY};
+
+    #[test]
+    fn rejects_non_7bit_fixed_header_fields() {
+        let header = CiHeader {
+            device_id: 0x7F,
+            sub_id2: SUB_ID2_DISCOVERY,
+            version: MESSAGE_FORMAT_VERSION_1_2,
+            source: Muid::ordinary(0x0012_3456).unwrap(),
+            dest: Muid::BROADCAST,
+        };
+        let mut encoded = [0u8; CI_HEADER_LEN];
+        header.encode(&mut encoded).unwrap();
+
+        for index in [1, 2, 3, 4] {
+            let mut invalid = encoded;
+            invalid[index] = 0x80;
+            assert_eq!(CiHeader::decode(&invalid), Err(CiError::BadField));
+        }
+
+        let mut invalid = header;
+        invalid.device_id = 0x80;
+        assert_eq!(invalid.encode(&mut encoded), Err(CiError::BadField));
+        invalid = header;
+        invalid.sub_id2 = 0x80;
+        assert_eq!(invalid.encode(&mut encoded), Err(CiError::BadField));
+        invalid = header;
+        invalid.version = 0x80;
+        assert_eq!(invalid.encode(&mut encoded), Err(CiError::BadField));
+    }
 
     #[test]
     fn header_roundtrip() {
