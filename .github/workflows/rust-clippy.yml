@@ -22,6 +22,7 @@ jobs:
   rust-clippy-analyze:
     name: Run rust-clippy analyzing
     runs-on: ubuntu-latest
+    container: ubuntu:26.04  # alsa-lib >= 1.2.13 (UMP symbols), matches ci.yml
     permissions:
       contents: read
       security-events: write
@@ -30,13 +31,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install build deps
+        run: apt-get update && apt-get install -y libasound2-dev pkg-config build-essential curl git
+
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af #@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
-          toolchain: stable
+          toolchain: "1.97.1"
           components: clippy
-          override: true
 
       - name: Install required cargo
         run: cargo install clippy-sarif sarif-fmt
