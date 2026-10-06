@@ -1,5 +1,6 @@
 /target/
 **/*.rs.bk
+**/*.rs.bak
 .idea/
 .vscode/
 *.swp
@@ -13,3 +14,4 @@
 *.profraw
 *.profdata
 *.src.rpm
+.token-optimizer/

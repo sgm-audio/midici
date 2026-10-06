@@ -49,9 +49,10 @@
   Ubuntu (`wsl -d Ubuntu`), rustup stable 1.97.1 auto-pinned, vendored `libasound2t64`
   extracted to `~/alsa` + minimal `~/bin/pkg-config` shim (no root); cargo runs use
   `RUSTFLAGS="-L /home/scott/alsa/usr/lib/x86_64-linux-gnu -C link-args=-Wl,-rpath,…"`.
-- To build/test the crates that DO compile (the real protocol surface), scope commands, e.g.:
-  `cargo test -p midici-core -p midici-pe -p midici-conformance -p midici-responder -p midici-transport-alsa`
-  and `cargo clippy` / `cargo run` on the same set. `examples/virtual-responder` and
-  `examples/clap-autoprop` are placeholder binaries that just print `name version` today.
+- To build/test the crates that compile on the current host (the real protocol surface), scope commands, e.g.:
+  `cargo test -p midici-core -p midici-pe -p midici-conformance -p midici-responder -p midici-transport-clap`
+  and `cargo clippy` / `cargo run` on the same set. `midici-transport-alsa` is Linux-only
+  (requires `libasound2-dev` + `pkg-config`); on Windows, skip the `-p midici-transport-alsa` argument.
+  `examples/virtual-responder` and `examples/clap-autoprop` are placeholder binaries that just print `name version` today.
 - Optional extras: `midici-pe` has a `zlib` feature (`--all-features`); the `crates/midici-pe/fuzz`
   targets need `cargo +nightly` + `cargo-fuzz` (not installed by default).

@@ -8,13 +8,13 @@ Rust MIDI-CI / Property Exchange responder stack.
 1. Clone the repo: `git clone https://github.com/sgm-audio/midici.git`
 2. Ensure Rust toolchain 1.97.1+: `rustup default stable`
 3. Build the core crate: `cargo build -p midici-core`
-4. Run the discovery example: `cargo run --example discover`
-5. Watch the property bag print — this demonstrates the PE responder auto-negotiating capabilities with a MIDI 2.0 controller.
+4. Run the test suite: `cargo test -p midici-core -p midici-pe -p midici-conformance`
+5. See `docs/guide/` for integration walkthroughs.
 
-**API Reference**: midici exposes three public types for embedding in plugin hosts:
-- `PropertyBag` — typed, extensible capability-negotiation container (128-bit property IDs, version-gated, forward-compatible)
-- `FeatureSet` — negotiated feature subset from a PE Discovery exchange
-- `PEResponse` — structured response to a Property Get/Set request
+**Public API surface** (see `docs/ARD-001.md` for the full architecture):
+- `CiEngine<R: Rng>` — sans-io MIDI-CI state machine (Discovery, MUID lifecycle, ACK/NAK)
+- `ResponderEngine` — ergonomic façade composing `CiEngine` + `PeController` (in `midici-pe`, re-exported by `midici-responder`)
+- `Ring<N, B>` — wait-free SPSC byte ring for RT-safe CLAP bridging (in `midici-transport-clap`)
 
 See `AGENTS.md` for the binding build rules and `docs/ARD-001.md` for the full architecture.
 
