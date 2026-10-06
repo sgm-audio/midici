@@ -13,19 +13,19 @@ use midici_core::spec::{
     SUB_ID2_PE_SET_INQUIRY, SUB_ID2_PE_SET_REPLY, SUB_ID2_PE_SUBSCRIPTION,
     SUB_ID2_PE_SUBSCRIPTION_REPLY,
 };
-use midici_core::{
-    pe_caps_reply, CiError, CiHeader, Muid, OutboundSysex, PeCapabilities, PeMessage,
-};
+use midici_core::{pe_caps_reply, CiError, CiHeader, Muid, OutboundSysex, PeCapabilities};
 
 use crate::chunker::split;
-use crate::frame::PeChunk;
+use crate::frame::PeChunkRef;
 use crate::json_header::{
     encode_reply_header, encode_sub_reply_header, encode_subscription_header,
     parse_get_inquiry_header, parse_notify_header, parse_set_inquiry_header,
     parse_subscription_header, GetInquiryHeader, SetInquiryHeader, SubCommand,
     NOTIFY_STATUS_TERMINATE,
 };
-use crate::reassembler::{ReassembleEvent, Reassembler, MAX_TX_BYTES};
+use crate::reassembler::{
+    ReassembleEvent, Reassembler, MAX_CONCURRENT_PER_PEER, MAX_TX_BYTES,
+};
 use crate::registry::ResourceRegistry;
 use crate::resource::PeQuery;
 use crate::status::PeStatus;
@@ -334,9 +334,11 @@ impl PeController {
         body: &[u8],
         now_ms: u64,
     ) -> Result<(), CiError> {
-        let msg = PeMessage::decode(body)?;
-        let peer = msg.header.source;
-        let chunk = match PeChunk::decode(&msg.pe_payload) {
+        // Decode the CI header once; the PE payload stays a borrowed slice
+        // for the whole hot path (no per-chunk heap copies). // ARD §3
+        let (header, pe_payload) = CiHeader::decode(body)?;
+        let peer = header.source;
+        let chunk = match PeChunkRef::decode(pe_payload) {
             Ok(c) => c,
             Err(_) => {
                 let ctx = ReplyCtx {
@@ -386,7 +388,7 @@ impl PeController {
             }
         }
 
-        match self.reassembler.feed(peer, &chunk, now_ms) {
+        match self.reassembler.feed_chunk(peer, &chunk, now_ms) {
             Ok(None) => Ok(()),
             Ok(Some(ReassembleEvent::Complete {
                 request_id,
@@ -557,22 +559,22 @@ impl PeController {
 
     /// Legacy Notify (0x3F) — receive-only. // M2-103 §12; M2-101 §8.13
     fn on_notify(&mut self, body: &[u8]) -> Result<(), CiError> {
-        let msg = match PeMessage::decode(body) {
-            Ok(m) => m,
+        let (ci_header, pe_payload) = match CiHeader::decode(body) {
+            Ok(h) => h,
             Err(_) => return Ok(()),
         };
-        let chunk = match PeChunk::decode(&msg.pe_payload) {
+        let chunk = match PeChunkRef::decode(pe_payload) {
             Ok(c) => c,
             Err(_) => return Ok(()),
         };
-        let header = match parse_notify_header(&chunk.header) {
+        let header = match parse_notify_header(chunk.header) {
             Ok(h) => h,
             Err(_) => return Ok(()),
         };
         if header.status == NOTIFY_STATUS_TERMINATE {
             // Terminate the inquiry for this Request ID immediately. // M2-103 §12.1.3
-            let _ = self.reassembler.cancel(msg.header.source, chunk.request_id);
-            self.take_active(msg.header.source, chunk.request_id);
+            let _ = self.reassembler.cancel(ci_header.source, chunk.request_id);
+            self.take_active(ci_header.source, chunk.request_id);
         }
         // 100 (timeout wait) / 408 (timeout) are initiator-side niceties; the
         // responder side has no pending initiator transactions in v1.
@@ -617,30 +619,28 @@ impl PeController {
         dest: Muid,
         pe_payload: &[u8],
     ) -> Result<(), CiError> {
-        let msg = PeMessage {
-            header: CiHeader {
-                device_id: DEVICE_ID_FUNCTION_BLOCK,
-                sub_id2,
-                version: MESSAGE_FORMAT_VERSION_1_2,
-                source,
-                dest,
-            },
-            pe_payload: pe_payload.to_vec(),
+        // Write the CI header and payload straight into the encode buffer —
+        // no intermediate owned `PeMessage` (or per-chunk payload clone). // ARD §3
+        let header = CiHeader {
+            device_id: DEVICE_ID_FUNCTION_BLOCK,
+            sub_id2,
+            version: MESSAGE_FORMAT_VERSION_1_2,
+            source,
+            dest,
         };
-        let need = midici_core::spec::CI_HEADER_LEN + msg.pe_payload.len();
+        let need = midici_core::spec::CI_HEADER_LEN + pe_payload.len();
         if self.encode_buf.len() < need {
             self.encode_buf.resize(need, 0);
         }
-        let n = msg.encode(&mut self.encode_buf)?;
-        let body = self.encode_buf[..n].to_vec();
-        self.push_out(group, &body);
+        header.encode(&mut self.encode_buf)?;
+        self.encode_buf[midici_core::spec::CI_HEADER_LEN..need].copy_from_slice(pe_payload);
+        self.push_out(group, &self.encode_buf[..need]);
         Ok(())
     }
 
     fn queue_msg(&mut self, group: u8, msg: &PeCapabilities) -> Result<(), CiError> {
         let n = msg.encode(&mut self.encode_buf)?;
-        let body = self.encode_buf[..n].to_vec();
-        self.push_out(group, &body);
+        self.push_out(group, &self.encode_buf[..n]);
         Ok(())
     }
 
@@ -682,7 +682,9 @@ impl PeController {
             simultaneous: simultaneous.max(1),
             pe_major,
             pe_minor,
-            active: Vec::new(),
+            // Pre-reserve the in-flight list: chunks from a fresh peer must
+            // not allocate. // ARD §3 (RT no-alloc budget)
+            active: Vec::with_capacity(MAX_CONCURRENT_PER_PEER),
         });
     }
 
