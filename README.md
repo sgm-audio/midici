@@ -61,3 +61,7 @@ The first command prints CLI help. The second opens the ALSA sequencer endpoint 
 - `docs/specs/` — checked-in MIDI 2.0 specification PDFs
 - `docs/guide/spec-coverage.md` — implementation status by area
 - `docs/PROGRESS.md` — append-only engineering and verification record
+
+## License
+
+MIT

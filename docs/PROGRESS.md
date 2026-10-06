@@ -1230,3 +1230,7 @@ exit=127
 - The user selected a 32-event deferred management queue that drops the oldest event on overflow. Implemented that bound in `ResponderEngine`, documented the loss behavior, and added a regression test checking that the newest 32 events remain in FIFO order. No loss counter is exposed; event-loss observability remains an open risk.
 - No policy was selected for PE capability-row admission, ALSA reassembly/fairness limits, or standalone zlib output size; no changes were made to those areas. The PE status-445 mapping remains pending a spec-owner decision.
 - The added Rust regression test cannot be executed here because Cargo/Rust tools remain unavailable. Static checks are rerun for this follow-up; no Rust test pass is claimed.
+
+### Main-branch synchronization — 2026-10-05
+- The refreshed remote showed five `main` commits after the PR base. A merge preview found one tree conflict, in the root README; the rest of `main` adds the ALSA `dump_ump_sysex7` example. Resolved the README in favor of the review-corrected scope/limitations text, retained the MIT license mention, and integrated the example.
+- Corrected the example's module documentation so its deterministic output is described as a manual fixture, not as captured conformance evidence or proof of interoperability. The PR had reported `CONFLICTING` before this merge; recheck GitHub's mergeability after pushing.
