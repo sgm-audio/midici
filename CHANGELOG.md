@@ -11,6 +11,15 @@ This file is generated from the conventional-commit history with `git-cliff`
 ## [Unreleased]
 
 ### Added
+- Peer liveness timeout: `CiConfig::peer_timeout_ms` (default 60 s, `0` =
+  disabled). Peers with no Discovery/Reply or PE activity are reaped with
+  `PeerInvalidated`; subscriptions and in-flight PE state are cleaned (ARD §7).
+- `Sysex7Reassembler` inbound cap (`with_max_body_bytes`) with a drop counter
+  — an endless Start/Continue stream can no longer grow memory (ARD §7).
+- Fuzz targets `fuzz_ci_header` and `fuzz_pe_json_header` (completing the
+  ARD §8 list: framing, CI header, PE JSON header, reassembler), smoke-run in
+  CI.
+- CI: miri job for the CLAP SPSC ring; clippy/test/doc now run `--all-features`.
 - Phase 4: PE Capabilities + Get pipeline with typed `PeStatus` (200/341/400/403/404/405/413/445)
 - Phase 4: Resource registry with `DeviceInfo`, `ResourceList`
 - Phase 4: JSON header parser with depth/size limits; malformed → 400 never panics
@@ -32,7 +41,36 @@ This file is generated from the conventional-commit history with `git-cliff`
   spec-coverage table with honest gaps
 - Documentation: crate READMEs, architecture guide, integration guide, RT contract, spec coverage
 
+### Changed
+- **Breaking (pre-0.2):** `midici-transport-clap` ring slots now carry an
+  explicit per-slot byte length. `Consumer::peek` returns exactly the pushed
+  bytes (payloads may end in `0x00`); `Consumer::pop_into` takes `&mut [u8]`
+  and returns `Option<usize>`. The old zero-padding + "last non-zero byte"
+  convention was removed (it truncated legitimate `0x00`-terminated bodies).
+- **Breaking (pre-0.2):** `CiConfig` gains `peer_timeout_ms`;
+  `PeerState` gains `last_seen_ms`; `CiEngine` gains `note_peer_activity`;
+  `PeController::poll` takes a per-peer max-SysEx table (stalled-tx 341 NAKs
+  now chunk to the peer's receivable size, not ours).
+- `ResourceList` stays in sync: every `ResourceRegistry::register` refreshes
+  the list, so resources registered after `with_device_info` (e.g.
+  `ChCtrlList`) appear in it.
+- Docs: README API reference + getting-started now match the real public API
+  and existing examples; duplicate ADR-001 copy replaced by a pointer to
+  `docs/ARD-001.md`; ARD §2 dependency table corrected (midi2 is
+  transport-alsa-only; the CLAP ring is hand-rolled, not `rtrb`).
+- Housekeeping: `mgmt.rs` shared identity/ACK-NAK encoding extracted
+  (~150 lines deduped); `PeController` reply path uses a `ReplyCtx`;
+  stale GitHub template workflows (`rust.yml`, `rust-clippy.yml`) removed.
+
 ### Fixed
+- `CiEngine::feed_sysex` no longer returns protocol errors: malformed inbound
+  SysEx is a NAK 0x41 or silent drop, never an `Err` — one bad packet from
+  any device on the bus can no longer take `virtual-responder` down.
+- SysEx7 UMP reassembly: a single-packet `Complete` arriving mid-message
+  starts a new message (M2-104); over-cap messages are dropped with a
+  counter instead of growing unbounded.
+- `ResourceList` no longer goes stale when resources are registered after
+  `ResourceRegistry::with_device_info`.
 - Phase 6: `forbid(unsafe_code)` → `deny` at workspace level so FFI crates can allow
 - Phase 6: `Ack` encode/decode for Message Format Version 1.1 (header-only parity with NAK)
 - Phase 6: Discovery rejects `max_sysex_size < 128` per M2-101 §5.5.3

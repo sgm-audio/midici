@@ -1114,3 +1114,90 @@ gates: fmt OK · clippy -D warnings OK · 23/23 test suites OK · cargo deny OK
 - Per-crate GH releases auto-created (midici-*-v0.1.0); the three earliest have
   empty bodies (created before `changelog_path` pointed at the root CHANGELOG —
   cosmetic, fix by hand or leave).
+
+---
+
+## Session — Refactor/robustness pass (user-directed, not an ARD phase) — 2026-10-05
+
+### Done
+Code (all verified by re-read; **not** compiled — see DoD below):
+- Docs: README API reference + getting-started fixed to the real public API
+  (PropertyBag/FeatureSet/PEResponse do not exist; `--example discover` does
+  not exist); `ADR/` duplicate replaced by a pointer to `docs/ARD-001.md`;
+  ARD §2 dependency table corrected (midi2 = transport-alsa only; CLAP ring is
+  hand-rolled, not `rtrb`); AGENTS.md stale "examples are placeholders" line
+  fixed.
+- Robustness:
+  - `CiEngine::feed_sysex` no longer returns protocol errors — malformed
+    header is a silent drop (cannot address a NAK), never `Err`; control loop
+    now logs-and-continues on any feed error. One bad packet can no longer
+    kill `virtual-responder`.
+  - `Sysex7Reassembler` bounded: `with_max_body_bytes` (wired from
+    `cfg.max_sysex_size`), word cap + completed-body length check, drop
+    counter surfaced at shutdown. Single-packet `Complete` mid-message now
+    starts a new message (M2-104).
+  - Peer liveness: `CiConfig::peer_timeout_ms` (default 60 s, 0 = off),
+    `PeerState::last_seen_ms`, `CiEngine::poll` reaps expired peers →
+    `PeerInvalidated` (existing `reap_peer` machinery cleans subs/reassembly);
+    `CiEngine::note_peer_activity` stamped from PE traffic in
+    `ResponderEngine::feed_sysex`.
+  - Stalled-tx 341 NAKs now chunk to the peer's negotiated max (per-peer
+    table passed into `PeController::poll`) instead of ours.
+  - `ResourceRegistry::register` refreshes `ResourceList` each call — list
+    no longer stale for resources added after `with_device_info`
+    (e.g. `ChCtrlList`).
+- Ring (CLAP, **breaking pre-0.2**): per-slot `u32` length; `peek` returns
+  exactly the pushed bytes (trailing `0x00` preserved); `pop_into(&mut [u8])
+  -> Option<usize>`; zero-padding removed. New regression tests incl.
+  trailing-zero payload; lib.rs roundtrip test now asserts exact length.
+- Refactors (behavior-preserving, public mgmt/PE API shapes unchanged):
+  `mgmt.rs` `IdentityFields` + shared `decode_ack_nak`/`encode_ack_nak`;
+  `engine.rs` `register_peer` shared by Discovery/Reply; `PeController`
+  `ReplyCtx` (removes four `too_many_arguments` allows);
+  `ResponderEngine::feed_sysex` single header decode.
+- CI: clippy/test/doc now `--all-features` (zlib path was never linted);
+  miri job for transport-clap; removed stale template workflows `rust.yml` +
+  `rust-clippy.yml` (build/test on bare ubuntu-latest without ALSA deps —
+  duplicates of ci.yml and failing); fuzz targets `fuzz_ci_header` (engine
+  must never panic AND never Err on arbitrary bytes) and
+  `fuzz_pe_json_header` added + smoke-run in CI (completes ARD §8's four
+  targets).
+- CHANGELOG.md: Unreleased section updated (Added/Changed/Fixed).
+
+### Deviations from ARD (with reason)
+- `peer_timeout_ms` value 60 s: ARD §7 mandates liveness-timeout reaping but
+  specifies no value; 60 s default chosen, configurable, 0 disables. Needs
+  Scott's sign-off (candidate HUMAN GATE).
+- Ring length convention changed (zero-padding → explicit length): the old
+  convention truncated `0x00`-terminated SysEx bodies (e.g. v2 Discovery with
+  output_path_id 0) and violated the "≤ 2 memcpys/event" RT budget. Breaking
+  but pre-0.2 and no external users of 0.1.0 exist yet.
+- ARD §2 dep table edited to match the code (doc fix, no protocol impact).
+
+### DoD (attempted)
+```text
+cargo fmt --all -- --check            → NOT RUN (no Rust toolchain in sandbox)
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo doc --workspace --no-deps --all-features
+    → NOT RUN: sandbox has no rustup/cargo and no network (rustup.rs
+    TLS handshake fails). Changes were verified by full re-read of every
+    touched file + grep sweeps for stale identifiers; gate runs are due on
+    a machine with the pinned 1.97.1 toolchain before merge.
+```
+
+### Open items
+- Run the DoD commands above locally (WSL/midici-dev) and paste outputs here.
+- Zero-copy inbound chain (borrowed `PeMessage`/`PeChunk` — 3–4 allocs per
+  chunk today) — deferred to a follow-up session (larger API change).
+- `assert_no_alloc` RT-path harness + 24 h churn soak (ARD §6/§8) — not yet
+  built; miri is now in CI.
+- `DeviceInfoResource { forbidden, not_allowed }` test hooks in public API —
+  candidate for a `test-resources` feature gate.
+- GH release bodies for the three earliest 0.1.0 tags (cosmetic, pre-existing).
+- rand 0.8 → 0.9 migration (workspace + proptest alignment; 0.2 chore).
+- Edition 2024 (0.2 chore).
+- HUMAN GATE: Scott signs off on the 60 s liveness default + ring convention.
+
+### Next
+Local DoD run + paste outputs; then the zero-copy inbound session.
