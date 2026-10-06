@@ -82,6 +82,7 @@ use alloc::vec::Vec;
 
 use rand_core::RngCore;
 
+use midici_core::spec::is_pe_sub_id;
 use midici_core::{CiConfig, CiEngine, CiError, CiEvent, Muid, OutboundSysex};
 
 use crate::controller::{NotifyBody, PeController, PeEvent};
@@ -100,6 +101,8 @@ pub struct ResponderEngine<R: RngCore> {
     /// Management events already drained from `ci`, kept for the app. This is
     /// capped at 32; the oldest pending event is discarded on overflow.
     pending_events: VecDeque<CiEvent>,
+    /// Reused (peer MUID, negotiated max SysEx) table for poll-time replies.
+    peer_max_scratch: Vec<(Muid, u32)>,
 }
 
 impl<R: RngCore> ResponderEngine<R> {
@@ -113,6 +116,7 @@ impl<R: RngCore> ResponderEngine<R> {
             now_ms: 0,
             known_peers: Vec::new(),
             pending_events: VecDeque::with_capacity(PENDING_EVENT_CAP),
+            peer_max_scratch: Vec::new(),
         }
     }
 
@@ -133,20 +137,21 @@ impl<R: RngCore> ResponderEngine<R> {
     }
 
     pub fn feed_sysex(&mut self, group: u8, body: &[u8]) -> Result<(), CiError> {
-        if PeController::is_pe_body(body) {
-            let peer_max = midici_core::CiHeader::decode(body)
-                .ok()
-                .and_then(|(h, _)| {
-                    self.ci
-                        .peers()
-                        .iter()
-                        .find(|p| p.muid == h.source)
-                        .map(|p| p.max_sysex)
-                })
-                .unwrap_or(self.ci.config().max_sysex_size);
-            return self
-                .pe
-                .feed(self.ci.muid(), peer_max, group, body, self.now_ms);
+        // Decode the CI header once and dispatch; management falls through to
+        // `CiEngine`, which re-checks addressing and version rules.
+        if let Ok((h, _)) = midici_core::CiHeader::decode(body) {
+            if is_pe_sub_id(h.sub_id2) {
+                let peer_max = self
+                    .ci
+                    .peers()
+                    .iter()
+                    .find(|p| p.muid == h.source)
+                    .map(|p| p.max_sysex)
+                    .unwrap_or(self.ci.config().max_sysex_size);
+                // PE traffic keeps the peer alive for liveness tracking. // ARD §7
+                self.ci.note_peer_activity(h.source);
+                return self.pe.feed(self.ci.muid(), peer_max, group, body, self.now_ms);
+            }
         }
         self.ci.feed_sysex(group, body)
     }
@@ -154,9 +159,18 @@ impl<R: RngCore> ResponderEngine<R> {
     pub fn poll(&mut self, now: u64) {
         self.now_ms = now;
         self.ci.poll(now);
-        let peer_max = self.ci.config().max_sysex_size;
-        self.pe
-            .poll(self.ci.muid(), peer_max, self.ci.config().local_group, now);
+        // Per-peer negotiated max SysEx for poll-time replies (stalled-tx
+        // 341 NAKs must chunk to the peer's receivable size, not ours).
+        self.peer_max_scratch.clear();
+        self.peer_max_scratch
+            .extend(self.ci.peers().iter().map(|p| (p.muid, p.max_sysex)));
+        self.pe.poll(
+            self.ci.muid(),
+            &self.peer_max_scratch,
+            self.ci.config().max_sysex_size,
+            self.ci.config().local_group,
+            now,
+        );
         // Intercept PeerInvalidated so PE state (subscriptions, in-flight
         // reassembly) is reaped at poll time, even if the app drains events
         // lazily. Events stay available via `next_event`. // M2-103 §11.5

@@ -23,6 +23,11 @@ pub struct CiConfig {
     pub max_peers: usize,
     /// UMP group used for locally originated announcements.
     pub local_group: u8,
+    /// Peer liveness timeout (monotonic millis). A peer with no Discovery /
+    /// Reply or PE activity within this window is reaped with
+    /// [`crate::CiEvent::PeerInvalidated`] (subscriptions and in-flight PE
+    /// state cleaned by the responder). `0` disables the timer. // ARD §7
+    pub peer_timeout_ms: u64,
 }
 
 impl CiConfig {
@@ -36,6 +41,7 @@ impl CiConfig {
             output_path_id: 0,
             max_peers: 16,
             local_group: 0,
+            peer_timeout_ms: 60_000,
         }
     }
 
@@ -56,6 +62,9 @@ pub struct PeerState {
     pub max_sysex: u32,
     pub output_path_id: u8,
     pub function_block: u8,
+    /// Last monotonic ms this peer was seen (Discovery/Reply or PE activity).
+    /// Drives the liveness timeout (see [`CiConfig::peer_timeout_ms`]). // ARD §7
+    pub last_seen_ms: u64,
 }
 
 impl PeerState {
@@ -87,6 +96,7 @@ impl PeerState {
         their_max: u32,
         ours_max: u32,
         output_path_id: u8,
+        last_seen_ms: u64,
     ) -> Self {
         let version = if version < MESSAGE_FORMAT_VERSION_1_1 {
             MESSAGE_FORMAT_VERSION_1_1
@@ -102,6 +112,7 @@ impl PeerState {
                 .min(CiConfig::clamp_max_sysex(ours_max)),
             output_path_id,
             function_block: FUNCTION_BLOCK_NONE,
+            last_seen_ms,
         }
     }
 }

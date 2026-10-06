@@ -13,9 +13,9 @@ use crate::mgmt::{mgmt_header, AckNakBody, Discovery, InvalidateMuid, Nak, Reply
 use crate::muid::Muid;
 use crate::spec::{
     message_format_version_reserved_set, CI_HEADER_LEN, DEVICE_ID_FUNCTION_BLOCK,
-    MESSAGE_FORMAT_VERSION_1_2, MIN_RECEIVABLE_SYSEX_SIZE, SUB_ID1_MIDI_CI, SUB_ID2_ACK,
-    SUB_ID2_DISCOVERY, SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY, SUB_ID2_INVALIDATE_MUID,
-    SUB_ID2_NAK, SUB_ID2_REPLY_TO_DISCOVERY, UNIVERSAL_NON_REALTIME,
+    FUNCTION_BLOCK_NONE, MESSAGE_FORMAT_VERSION_1_2, MIN_RECEIVABLE_SYSEX_SIZE, SUB_ID1_MIDI_CI,
+    SUB_ID2_ACK, SUB_ID2_DISCOVERY, SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY,
+    SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK, SUB_ID2_REPLY_TO_DISCOVERY, UNIVERSAL_NON_REALTIME,
 };
 /// Pre-reserved outbound queue depth (control-plane).
 const OUTBOUND_CAP: usize = 32;
@@ -95,9 +95,12 @@ impl<R: RngCore> CiEngine<R> {
 
         let (header, _) = match CiHeader::decode(body) {
             Ok(h) => h,
-            Err(CiError::NotUniversalSysex) | Err(CiError::NotMidiCi) => return Ok(()),
-            Err(CiError::Truncated) => return Ok(()),
-            Err(e) => return Err(e),
+            // Malformed header: without valid source/dest MUIDs we cannot
+            // address a NAK, so silent drop — exactly like the Truncated case
+            // above. Crucially, one bad packet from any device on the bus
+            // must never surface as an error (and never take a daemon down).
+            // // M2-101 §5.2.1 (header incomplete) / §5.11 (0x41 when addressable)
+            Err(_) => return Ok(()),
         };
 
         // Reserved Message Format Version bits → NAK 0x02. // M2-101 §5.3 / §5.4
@@ -138,8 +141,30 @@ impl<R: RngCore> CiEngine<R> {
     /// Drive timeouts. `now` is monotonic millis. // ARD §3
     pub fn poll(&mut self, now: u64) {
         self.now_ms = now;
-        // Management-only phase: no PE inactivity timers yet.
-        let _ = self.now_ms;
+        // Peer liveness: reap peers with no Discovery/Reply or PE activity
+        // within the configured window. Subscriptions and in-flight PE state
+        // of reaped peers are cleaned by the ResponderEngine's interception of
+        // PeerInvalidated. // ARD §7 "subscription leak"
+        if self.cfg.peer_timeout_ms != 0 {
+            let mut i = 0;
+            while i < self.peers.len() {
+                if now.saturating_sub(self.peers[i].last_seen_ms) >= self.cfg.peer_timeout_ms {
+                    let evicted = self.peers.swap_remove(i);
+                    self.push_event(CiEvent::PeerInvalidated { muid: evicted.muid });
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    /// Record activity (e.g. PE traffic) from `muid` for peer-liveness
+    /// tracking. Unknown peers are ignored. // ARD §7
+    #[inline]
+    pub fn note_peer_activity(&mut self, muid: Muid) {
+        if let Some(p) = self.peers.iter_mut().find(|p| p.muid == muid) {
+            p.last_seen_ms = self.now_ms;
+        }
     }
 
     /// Drain one outbound SysEx body. // ARD §3
@@ -203,20 +228,15 @@ impl<R: RngCore> CiEngine<R> {
             software_revision: disc.software_revision,
         };
         let caps = CapFlags(disc.category_supported);
-        self.upsert_peer(PeerState::from_discovery(
+        self.register_peer(
             disc.header.source,
             info,
             caps,
             disc.header.version,
             disc.max_sysex_size,
-            self.cfg.max_sysex_size,
             disc.output_path_id,
-        ));
-        self.push_event(CiEvent::PeerDiscovered {
-            muid: disc.header.source,
-            info,
-            caps,
-        });
+            FUNCTION_BLOCK_NONE,
+        );
 
         let reply = ReplyToDiscovery {
             header: CiHeader {
@@ -268,23 +288,43 @@ impl<R: RngCore> CiEngine<R> {
             software_revision: reply.software_revision,
         };
         let caps = CapFlags(reply.category_supported);
-        let mut peer = PeerState::from_discovery(
+        self.register_peer(
             reply.header.source,
             info,
             caps,
             reply.header.version,
             reply.max_sysex_size,
-            self.cfg.max_sysex_size,
             reply.output_path_id,
+            reply.function_block,
         );
-        peer.function_block = reply.function_block;
-        self.upsert_peer(peer);
-        self.push_event(CiEvent::PeerDiscovered {
-            muid: reply.header.source,
+        Ok(())
+    }
+
+    /// Upsert a discovered peer (stamping liveness) and emit
+    /// [`CiEvent::PeerDiscovered`]. Shared by Discovery and Reply handling.
+    fn register_peer(
+        &mut self,
+        muid: Muid,
+        info: DeviceIdentity,
+        caps: CapFlags,
+        version: u8,
+        their_max: u32,
+        output_path_id: u8,
+        function_block: u8,
+    ) {
+        let mut peer = PeerState::from_discovery(
+            muid,
             info,
             caps,
-        });
-        Ok(())
+            version,
+            their_max,
+            self.cfg.max_sysex_size,
+            output_path_id,
+            self.now_ms,
+        );
+        peer.function_block = function_block;
+        self.upsert_peer(peer);
+        self.push_event(CiEvent::PeerDiscovered { muid, info, caps });
     }
 
     fn on_invalidate(&mut self, group: u8, body: &[u8]) -> Result<(), CiError> {
