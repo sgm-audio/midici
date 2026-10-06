@@ -1201,3 +1201,74 @@ cargo doc --workspace --no-deps --all-features
 
 ### Next
 Local DoD run + paste outputs; then the zero-copy inbound session.
+
+## Session 2 — Zero-copy inbound + no-alloc harness + test-knobs — 2026-10-06
+
+### Done
+(continues the user-approved refactor list: item 4 "zero-copy inbound" and
+item 5 "CI/verification — no-alloc harness"; verified by re-read only, **not**
+compiled — see DoD)
+- Zero-copy inbound chain (ARD §3):
+  - `frame.rs`: shared `decode_fields` (one validation path for owned and
+    borrowed decodes, same check order); new `PeChunkRef<'a>` (Copy view:
+    request_id + borrowed header/property) with allocation-free `decode()`
+    and `to_owned()`; `PeChunk` retained for fuzz/conformance consumers;
+    frame tests for borrowed↔owned parity.
+  - `controller.rs`: `on_chunked_inquiry` and `on_notify` decode
+    `CiHeader` + `PeChunkRef` straight from the input buffer (the old
+    `PeMessage::decode` + `PeChunk::decode` copied payload, header and
+    property — 2–3 allocations per chunk on the hot path); `queue_pe`/
+    `queue_msg` write CI header + payload directly into the scratch encode
+    buffer (drops the per-chunk `to_vec` double copy); a new peer's
+    in-flight list is pre-reserved at `MAX_CONCURRENT_PER_PEER`.
+  - `reassembler.rs`: `feed` is now a thin wrapper over the new public
+    `feed_chunk(peer, &PeChunkRef, now_ms)`; fragments still land in the
+    pre-reserved slot buffers (no capacity growth).
+- No-alloc harness:
+  - New `crates/midici-test-alloc` (`publish = false`): counting global
+    allocator — forwards every call to `System`, counts live
+    alloc/dealloc pairs. It is the workspace's single documented `unsafe`
+    crate; all product crates keep `unsafe_code = "forbid"`.
+  - `midici-pe/tests/rt_no_alloc.rs`: full engine setup (Discovery + PE
+    Caps + one complete 2-chunk Set warmup) runs before the baseline; then
+    (1) feeding chunk 1 of 2 leaves the live allocation count strictly
+    unchanged, and (2) feeding chunk 2 (completion → 200 reply +
+    `PropertySet` event) plus draining the outbound/event queues returns
+    the count to the baseline (transient allocs net to zero).
+  - Deliberately outside the measured window: `poll` scratch vecs (reap
+    scans) and the 60 s liveness timer — both are timer-path, not
+    feed-path.
+- Housekeeping:
+  - `midici-pe` gains a `test-knobs` feature gating the
+    `DeviceInfoResource` `forbidden`/`not_allowed` error-injection fields;
+    the conformance suite enables it alongside `zlib`; default (and any
+    embedded) builds are free of the test hooks.
+
+### Deviations from ARD (with reason)
+- None new. The counting allocator adds a test-only crate rather than
+  weakening a product crate's `unsafe_code = "forbid"`.
+- Note: the sandbox git store was reset between sessions (the six prior
+  commits were unpushed and their objects are gone); history was
+  reconstructed from the persisted working tree with the same grouping and
+  messages. Final tree is unchanged.
+
+### DoD (attempted)
+```text
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+    → NOT RUN: sandbox still has no rustup/cargo (rustup.rs TLS fails).
+    Verified by full re-read of every touched file + grep sweeps; gate runs
+    are due on a machine with the pinned 1.97.1 toolchain before merge.
+```
+
+### Open items
+- Run the DoD commands locally (WSL/midici-dev) and paste outputs here.
+- 24 h churn soak (ARD §8) — not yet run (needs a live toolchain/daemon).
+- GH release bodies for the three earliest 0.1.0 tags (cosmetic, pre-existing).
+- rand 0.8 → 0.9 migration (workspace + proptest alignment; 0.2 chore).
+- Edition 2024 (0.2 chore).
+- HUMAN GATE: Scott signs off on the 60 s liveness default + ring convention.
+
+### Next
+Local DoD run + paste outputs; then decide on pushing the branch.

@@ -11,6 +11,16 @@ This file is generated from the conventional-commit history with `git-cliff`
 ## [Unreleased]
 
 ### Added
+- `PeChunkRef`: zero-copy view of a decoded PE chunk (borrowed
+  header/property). The chunked-inquiry inbound path decodes once and makes
+  no per-chunk heap copies until a transaction completes (ARD §3).
+- `test-knobs` feature (midici-pe, off by default) gating the
+  `DeviceInfoResource` `forbidden`/`not_allowed` error-injection fields;
+  the conformance suite enables it alongside `zlib`.
+- `midici-test-alloc` (test-only, not published): counting global allocator,
+  plus a `rt_no_alloc` integration test proving a partial multi-chunk feed
+  is strictly allocation-free and a completed exchange is
+  allocation-net-zero.
 - Peer liveness timeout: `CiConfig::peer_timeout_ms` (default 60 s, `0` =
   disabled). Peers with no Discovery/Reply or PE activity are reaped with
   `PeerInvalidated`; subscriptions and in-flight PE state are cleaned (ARD §7).
@@ -42,6 +52,12 @@ This file is generated from the conventional-commit history with `git-cliff`
 - Documentation: crate READMEs, architecture guide, integration guide, RT contract, spec coverage
 
 ### Changed
+- `Reassembler::feed` now delegates to the new public
+  `feed_chunk(&PeChunkRef)`; the PE controller decodes inbound chunks as
+  borrowed views and encodes replies straight into its scratch buffer
+  (no per-chunk payload clones / double copies).
+- A new PE peer's in-flight transaction list is pre-reserved, so the first
+  chunk from a fresh peer allocates nothing.
 - **Breaking (pre-0.2):** `midici-transport-clap` ring slots now carry an
   explicit per-slot byte length. `Consumer::peek` returns exactly the pushed
   bytes (payloads may end in `0x00`); `Consumer::pop_into` takes `&mut [u8]`
