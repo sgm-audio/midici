@@ -32,6 +32,7 @@ serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 [dev-dependencies]
 proptest = "1.6"
 rand = "0.8"
+midici-test-alloc = { path = "../midici-test-alloc" }
 
 [lints.rust]
 unsafe_code = "forbid"
