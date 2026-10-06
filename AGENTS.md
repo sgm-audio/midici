@@ -53,6 +53,8 @@
   `cargo test -p midici-core -p midici-pe -p midici-conformance -p midici-responder -p midici-transport-clap`
   and `cargo clippy` / `cargo run` on the same set. `midici-transport-alsa` is Linux-only
   (requires `libasound2-dev` + `pkg-config`); on Windows, skip the `-p midici-transport-alsa` argument.
-  `examples/virtual-responder` and `examples/clap-autoprop` are placeholder binaries that just print `name version` today.
+  `examples/virtual-responder` is the full standalone daemon (control loop over a virtual ALSA UMP
+  endpoint); `examples/clap-autoprop` ships the tested control-thread `flush_param_change` wiring,
+  but its `main` stays a stub until the CLAP host binding lands (Phase 6).
 - Optional extras: `midici-pe` has a `zlib` feature (`--all-features`); the `crates/midici-pe/fuzz`
   targets need `cargo +nightly` + `cargo-fuzz` (not installed by default).
