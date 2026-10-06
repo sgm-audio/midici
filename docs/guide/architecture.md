@@ -46,7 +46,7 @@ PE messages are addressed only when the destination MUID is ours or broadcast. U
 
 - `CiEngine::poll(now)` accepts a timestamp but currently does not store or use it; it does not drive management retry/ACK timers.
 - `ResponderEngine::poll(now)` drives PE reassembly inactivity timeouts, moves management events to the responder's pending queue, and reaps PE state for vanished peers.
-- `ResponderEngine::next_event()` drains management `CiEvent`s; `next_pe_event()` drains PE `PeEvent`s.
+- `ResponderEngine::next_event()` drains management `CiEvent`s from a 32-entry buffer; the oldest event is discarded on overflow. `next_pe_event()` drains PE `PeEvent`s.
 - `next_outbound()` drains management output before PE output. PE replies are chunked to the negotiated/clamped SysEx size; `CiEngine` management messages are not PE-chunked.
 
 The current event enums are smaller than the original architecture proposal:

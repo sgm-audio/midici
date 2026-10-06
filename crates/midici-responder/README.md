@@ -23,6 +23,8 @@ loop {
 }
 ```
 
+The management-event buffer retains at most 32 events and drops the oldest on overflow; it has no loss counter. Drain `next_event()` regularly if every event matters.
+
 The façade does not add transport-agnostic ring pairings or logging hooks. Current implementation limits are listed in the workspace [`README`](../../README.md).
 
 ## Dependencies

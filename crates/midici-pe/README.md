@@ -10,6 +10,7 @@ Property Exchange responder code: PE capabilities, chunked Get/Set/subscription 
 - **Legacy Notify (`0x3F`)** — receive-only; the supported termination path cancels reassembly by request ID.
 - **Chunking / reassembly** — 7-bit framing, header only in chunk 1, 128–4096-byte clamp, 64 KiB property cap, four concurrent transactions per peer, bounded fragment metadata, and a 3-second inactivity timeout.
 - **Resources** — `DeviceInfo`, a generated `ResourceList`, and custom `PropertyResource` handlers.
+- **Management event retention** — `ResponderEngine` buffers at most 32 management events and discards the oldest on overflow. There is no drop counter/event; applications should drain `next_event()` regularly if every event matters.
 - **JSON headers** — 7-bit, 4 KiB, and depth-32 checks.
 - **Typed status subset** — see the status-445 conflict in `docs/PROGRESS.md`; do not assume the busy mapping is protocol-approved.
 
