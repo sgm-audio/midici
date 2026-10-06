@@ -87,6 +87,9 @@ use midici_core::{CiConfig, CiEngine, CiError, CiEvent, Muid, OutboundSysex};
 use crate::controller::{NotifyBody, PeController, PeEvent};
 use crate::registry::ResourceRegistry;
 
+/// Maximum number of deferred management events retained for the application.
+const PENDING_EVENT_CAP: usize = 32;
+
 /// Sans-io responder: [`CiEngine`] + PE Capabilities/Get/Set/Subscriptions.
 pub struct ResponderEngine<R: RngCore> {
     pub ci: CiEngine<R>,
@@ -94,7 +97,8 @@ pub struct ResponderEngine<R: RngCore> {
     now_ms: u64,
     /// Peers seen on the last `poll`; disappearance ⇒ reap PE state (ARD §7).
     known_peers: Vec<Muid>,
-    /// Management events already drained from `ci`, kept for the app.
+    /// Management events already drained from `ci`, kept for the app. This is
+    /// capped at 32; the oldest pending event is discarded on overflow.
     pending_events: VecDeque<CiEvent>,
 }
 
@@ -108,7 +112,7 @@ impl<R: RngCore> ResponderEngine<R> {
             pe,
             now_ms: 0,
             known_peers: Vec::new(),
-            pending_events: VecDeque::new(),
+            pending_events: VecDeque::with_capacity(PENDING_EVENT_CAP),
         }
     }
 
@@ -160,7 +164,7 @@ impl<R: RngCore> ResponderEngine<R> {
             if let CiEvent::PeerInvalidated { muid } = ev {
                 self.pe.reap_peer(muid);
             }
-            self.pending_events.push_back(ev);
+            push_pending_event(&mut self.pending_events, ev);
         }
         self.reap_vanished_peers();
     }
@@ -169,6 +173,11 @@ impl<R: RngCore> ResponderEngine<R> {
         self.ci.next_outbound().or_else(|| self.pe.next_outbound())
     }
 
+    /// Drain the oldest retained management event.
+    ///
+    /// At most 32 events are retained; the oldest is discarded if the buffer is
+    /// full when another event arrives. No overflow counter is exposed.
+    /// Applications should drain regularly if they need to observe every event.
     pub fn next_event(&mut self) -> Option<CiEvent> {
         self.pending_events.pop_front()
     }
@@ -199,5 +208,45 @@ impl<R: RngCore> ResponderEngine<R> {
         }
         self.known_peers
             .extend(self.ci.peers().iter().map(|p| p.muid));
+    }
+}
+
+fn push_pending_event(events: &mut VecDeque<CiEvent>, event: CiEvent) {
+    if events.len() >= PENDING_EVENT_CAP {
+        let _ = events.pop_front();
+    }
+    events.push_back(event);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use midici_core::NakCode;
+
+    #[test]
+    fn deferred_management_events_are_bounded_and_drop_oldest() {
+        let mut events = VecDeque::with_capacity(PENDING_EVENT_CAP);
+        let last_peer = PENDING_EVENT_CAP as u32 + 5;
+
+        for peer_id in 1..=last_peer {
+            push_pending_event(
+                &mut events,
+                CiEvent::Nak {
+                    peer: Muid::ordinary(peer_id).unwrap(),
+                    original: 0,
+                    code: NakCode::Nak,
+                },
+            );
+        }
+
+        assert_eq!(events.len(), PENDING_EVENT_CAP);
+        for expected_peer in 6..=last_peer {
+            let event = events.pop_front().unwrap();
+            assert!(matches!(
+                event,
+                CiEvent::Nak { peer, .. } if peer.to_u32() == expected_peer
+            ));
+        }
+        assert!(events.is_empty());
     }
 }
