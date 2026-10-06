@@ -9,7 +9,9 @@ use midici_core::{mgmt_header, Discovery, Muid};
 use midici_transport_alsa::sysex7_ump::encode_sysex7_packets;
 
 fn main() {
-    let which = std::env::args().nth(1).unwrap_or_else(|| "discovery".into());
+    let which = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "discovery".into());
     let body: Vec<u8> = match which.as_str() {
         "discovery" => {
             // Our MUID under test; broadcast dest. Identity mirrors the
