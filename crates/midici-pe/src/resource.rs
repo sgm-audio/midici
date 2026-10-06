@@ -37,8 +37,16 @@ pub trait PropertyResource: Send {
 pub struct DeviceInfoResource {
     pub identity: DeviceIdentity,
     /// When true, Get returns [`PeStatus::Forbidden`].
+    ///
+    /// Test-only knob — available under the `test-knobs` feature so the
+    /// conformance suite can exercise error paths without polluting the
+    /// default (and any embedded) build.
+    #[cfg(feature = "test-knobs")]
     pub forbidden: bool,
     /// When true, Get returns [`PeStatus::NotAllowed`].
+    ///
+    /// Test-only knob — see [`Self::forbidden`].
+    #[cfg(feature = "test-knobs")]
     pub not_allowed: bool,
 }
 
@@ -46,7 +54,9 @@ impl DeviceInfoResource {
     pub fn new(identity: DeviceIdentity) -> Self {
         Self {
             identity,
+            #[cfg(feature = "test-knobs")]
             forbidden: false,
+            #[cfg(feature = "test-knobs")]
             not_allowed: false,
         }
     }
@@ -70,9 +80,11 @@ impl PropertyResource for DeviceInfoResource {
     }
 
     fn get(&self, _req: &PeQuery) -> PeResult<Payload> {
+        #[cfg(feature = "test-knobs")]
         if self.forbidden {
             return Err(PeStatus::Forbidden);
         }
+        #[cfg(feature = "test-knobs")]
         if self.not_allowed {
             return Err(PeStatus::NotAllowed);
         }
