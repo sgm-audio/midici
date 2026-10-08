@@ -1272,3 +1272,56 @@ cargo test --workspace --all-features
 
 ### Next
 Local DoD run + paste outputs; then decide on pushing the branch.
+
+## Session 3 — DoD attempt + human-gate approvals — 2026-10-07
+
+### Human-gate decisions
+- Scott approves the `CiConfig::peer_timeout_ms` default of 60,000 ms. The
+  timeout remains configurable; `0` disables it.
+- Scott approves the ring length convention: every slot carries an explicit
+  byte length, and consumers preserve the entire pushed payload, including
+  any trailing `0x00` bytes. Payload length is not inferred from the last
+  non-zero byte.
+
+### DoD outputs (verbatim)
+
+Environment check:
+```text
+cargo: unavailable
+rustc: unavailable
+rustup: unavailable
+```
+
+Commands attempted from the repository root:
+```text
+$ cargo fmt --all -- --check
+/bin/bash: line 1: cargo: command not found
+(exit 127)
+
+$ cargo clippy --workspace --all-targets --all-features -- -D warnings
+/bin/bash: line 1: cargo: command not found
+(exit 127)
+
+$ cargo test --workspace --all-features
+/bin/bash: line 1: cargo: command not found
+(exit 127)
+```
+
+The local DoD run is **blocked, not passed**: this sandbox has no Rust
+installation (`cargo`, `rustc`, and `rustup` are unavailable). The three gates
+must still be run on a machine with the pinned Rust toolchain before merge;
+no compilation or test results are claimed here. GitHub Actions is also
+currently failing before runner assignment (see PR checks), so it does not
+substitute for these local results.
+
+### Open items
+- Run the three DoD commands above on a machine with the pinned Rust 1.97.1
+toolchain and append their verbatim outputs before merge.
+- 24 h churn soak (ARD §8) — not yet run (needs a live toolchain/daemon).
+- GH release bodies for the three earliest 0.1.0 tags (cosmetic, pre-existing).
+- rand 0.8 → 0.9 migration (workspace + proptest alignment; 0.2 chore).
+- Edition 2024 (0.2 chore).
+
+### Next
+Run and record the DoD gates on a Rust-enabled machine; human-gate approvals
+are recorded above.
