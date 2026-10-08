@@ -7,6 +7,7 @@ members = [
     "crates/midici-transport-alsa",
     "crates/midici-transport-clap",
     "crates/midici-conformance",
+    "crates/midici-test-alloc",
     "examples/virtual-responder",
     "examples/clap-autoprop",
 ]

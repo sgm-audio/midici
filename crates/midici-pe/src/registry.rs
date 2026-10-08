@@ -25,17 +25,13 @@ impl ResourceRegistry {
     }
 
     /// Registry with DeviceInfo + ResourceList (ResourceList lists both). // ARD §5
+    ///
+    /// `ResourceList` stays in sync automatically: every later
+    /// [`Self::register`] refreshes it, so resources added after this call
+    /// (e.g. `ChCtrlList`) appear in the list.
     pub fn with_device_info(identity: DeviceIdentity) -> Self {
         let mut reg = Self::new();
         reg.register(Box::new(DeviceInfoResource::new(identity)));
-        // ResourceList is added after we know names — rebuild list entry.
-        let names = reg.resource_names();
-        // Include ResourceList itself in the list.
-        let mut names = names;
-        if !names.iter().any(|n| n == "ResourceList") {
-            names.push(String::from("ResourceList"));
-        }
-        reg.register(Box::new(ResourceListResource::new(names)));
         reg
     }
 
@@ -49,6 +45,29 @@ impl ResourceRegistry {
             self.resources[i] = resource;
         } else {
             self.resources.push(resource);
+        }
+        self.refresh_resource_list();
+    }
+
+    /// Rebuild the `ResourceList` entry from the current names (including
+    /// itself). Called on every registration so the list is never stale.
+    /// // M2-103 §14 / ARD §5
+    fn refresh_resource_list(&mut self) {
+        let mut names = self
+            .resources
+            .iter()
+            .map(|r| String::from(r.resource()))
+            .filter(|n| n != "ResourceList")
+            .collect::<Vec<String>>();
+        names.push(String::from("ResourceList"));
+        if let Some(i) = self
+            .resources
+            .iter()
+            .position(|r| r.resource() == "ResourceList")
+        {
+            self.resources[i] = Box::new(ResourceListResource::new(names));
+        } else {
+            self.resources.push(Box::new(ResourceListResource::new(names)));
         }
     }
 

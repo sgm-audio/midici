@@ -1114,3 +1114,222 @@ gates: fmt OK · clippy -D warnings OK · 23/23 test suites OK · cargo deny OK
 - Per-crate GH releases auto-created (midici-*-v0.1.0); the three earliest have
   empty bodies (created before `changelog_path` pointed at the root CHANGELOG —
   cosmetic, fix by hand or leave).
+
+---
+
+## Session — Refactor/robustness pass (user-directed, not an ARD phase) — 2026-10-05
+
+### Done
+Code (all verified by re-read; **not** compiled — see DoD below):
+- Docs: README API reference + getting-started fixed to the real public API
+  (PropertyBag/FeatureSet/PEResponse do not exist; `--example discover` does
+  not exist); `ADR/` duplicate replaced by a pointer to `docs/ARD-001.md`;
+  ARD §2 dependency table corrected (midi2 = transport-alsa only; CLAP ring is
+  hand-rolled, not `rtrb`); AGENTS.md stale "examples are placeholders" line
+  fixed.
+- Robustness:
+  - `CiEngine::feed_sysex` no longer returns protocol errors — malformed
+    header is a silent drop (cannot address a NAK), never `Err`; control loop
+    now logs-and-continues on any feed error. One bad packet can no longer
+    kill `virtual-responder`.
+  - `Sysex7Reassembler` bounded: `with_max_body_bytes` (wired from
+    `cfg.max_sysex_size`), word cap + completed-body length check, drop
+    counter surfaced at shutdown. Single-packet `Complete` mid-message now
+    starts a new message (M2-104).
+  - Peer liveness: `CiConfig::peer_timeout_ms` (default 60 s, 0 = off),
+    `PeerState::last_seen_ms`, `CiEngine::poll` reaps expired peers →
+    `PeerInvalidated` (existing `reap_peer` machinery cleans subs/reassembly);
+    `CiEngine::note_peer_activity` stamped from PE traffic in
+    `ResponderEngine::feed_sysex`.
+  - Stalled-tx 341 NAKs now chunk to the peer's negotiated max (per-peer
+    table passed into `PeController::poll`) instead of ours.
+  - `ResourceRegistry::register` refreshes `ResourceList` each call — list
+    no longer stale for resources added after `with_device_info`
+    (e.g. `ChCtrlList`).
+- Ring (CLAP, **breaking pre-0.2**): per-slot `u32` length; `peek` returns
+  exactly the pushed bytes (trailing `0x00` preserved); `pop_into(&mut [u8])
+  -> Option<usize>`; zero-padding removed. New regression tests incl.
+  trailing-zero payload; lib.rs roundtrip test now asserts exact length.
+- Refactors (behavior-preserving, public mgmt/PE API shapes unchanged):
+  `mgmt.rs` `IdentityFields` + shared `decode_ack_nak`/`encode_ack_nak`;
+  `engine.rs` `register_peer` shared by Discovery/Reply; `PeController`
+  `ReplyCtx` (removes four `too_many_arguments` allows);
+  `ResponderEngine::feed_sysex` single header decode.
+- CI: clippy/test/doc now `--all-features` (zlib path was never linted);
+  miri job for transport-clap; removed stale template workflows `rust.yml` +
+  `rust-clippy.yml` (build/test on bare ubuntu-latest without ALSA deps —
+  duplicates of ci.yml and failing); fuzz targets `fuzz_ci_header` (engine
+  must never panic AND never Err on arbitrary bytes) and
+  `fuzz_pe_json_header` added + smoke-run in CI (completes ARD §8's four
+  targets).
+- CHANGELOG.md: Unreleased section updated (Added/Changed/Fixed).
+
+### Deviations from ARD (with reason)
+- `peer_timeout_ms` value 60 s: ARD §7 mandates liveness-timeout reaping but
+  specifies no value; 60 s default chosen, configurable, 0 disables. Needs
+  Scott's sign-off (candidate HUMAN GATE).
+- Ring length convention changed (zero-padding → explicit length): the old
+  convention truncated `0x00`-terminated SysEx bodies (e.g. v2 Discovery with
+  output_path_id 0) and violated the "≤ 2 memcpys/event" RT budget. Breaking
+  but pre-0.2 and no external users of 0.1.0 exist yet.
+- ARD §2 dep table edited to match the code (doc fix, no protocol impact).
+
+### DoD (attempted)
+```text
+cargo fmt --all -- --check            → NOT RUN (no Rust toolchain in sandbox)
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo doc --workspace --no-deps --all-features
+    → NOT RUN: sandbox has no rustup/cargo and no network (rustup.rs
+    TLS handshake fails). Changes were verified by full re-read of every
+    touched file + grep sweeps for stale identifiers; gate runs are due on
+    a machine with the pinned 1.97.1 toolchain before merge.
+```
+
+### Open items
+- Run the DoD commands above locally (WSL/midici-dev) and paste outputs here.
+- Zero-copy inbound chain (borrowed `PeMessage`/`PeChunk` — 3–4 allocs per
+  chunk today) — deferred to a follow-up session (larger API change).
+- `assert_no_alloc` RT-path harness + 24 h churn soak (ARD §6/§8) — not yet
+  built; miri is now in CI.
+- `DeviceInfoResource { forbidden, not_allowed }` test hooks in public API —
+  candidate for a `test-resources` feature gate.
+- GH release bodies for the three earliest 0.1.0 tags (cosmetic, pre-existing).
+- rand 0.8 → 0.9 migration (workspace + proptest alignment; 0.2 chore).
+- Edition 2024 (0.2 chore).
+- HUMAN GATE: Scott signs off on the 60 s liveness default + ring convention.
+
+### Next
+Local DoD run + paste outputs; then the zero-copy inbound session.
+
+## Session 2 — Zero-copy inbound + no-alloc harness + test-knobs — 2026-10-06
+
+### Done
+(continues the user-approved refactor list: item 4 "zero-copy inbound" and
+item 5 "CI/verification — no-alloc harness"; verified by re-read only, **not**
+compiled — see DoD)
+- Zero-copy inbound chain (ARD §3):
+  - `frame.rs`: shared `decode_fields` (one validation path for owned and
+    borrowed decodes, same check order); new `PeChunkRef<'a>` (Copy view:
+    request_id + borrowed header/property) with allocation-free `decode()`
+    and `to_owned()`; `PeChunk` retained for fuzz/conformance consumers;
+    frame tests for borrowed↔owned parity.
+  - `controller.rs`: `on_chunked_inquiry` and `on_notify` decode
+    `CiHeader` + `PeChunkRef` straight from the input buffer (the old
+    `PeMessage::decode` + `PeChunk::decode` copied payload, header and
+    property — 2–3 allocations per chunk on the hot path); `queue_pe`/
+    `queue_msg` write CI header + payload directly into the scratch encode
+    buffer (drops the per-chunk `to_vec` double copy); a new peer's
+    in-flight list is pre-reserved at `MAX_CONCURRENT_PER_PEER`.
+  - `reassembler.rs`: `feed` is now a thin wrapper over the new public
+    `feed_chunk(peer, &PeChunkRef, now_ms)`; fragments still land in the
+    pre-reserved slot buffers (no capacity growth).
+- No-alloc harness:
+  - New `crates/midici-test-alloc` (`publish = false`): counting global
+    allocator — forwards every call to `System`, counts live
+    alloc/dealloc pairs. It is the workspace's single documented `unsafe`
+    crate; all product crates keep `unsafe_code = "forbid"`.
+  - `midici-pe/tests/rt_no_alloc.rs`: full engine setup (Discovery + PE
+    Caps + one complete 2-chunk Set warmup) runs before the baseline; then
+    (1) feeding chunk 1 of 2 leaves the live allocation count strictly
+    unchanged, and (2) feeding chunk 2 (completion → 200 reply +
+    `PropertySet` event) plus draining the outbound/event queues returns
+    the count to the baseline (transient allocs net to zero).
+  - Deliberately outside the measured window: `poll` scratch vecs (reap
+    scans) and the 60 s liveness timer — both are timer-path, not
+    feed-path.
+- Housekeeping:
+  - `midici-pe` gains a `test-knobs` feature gating the
+    `DeviceInfoResource` `forbidden`/`not_allowed` error-injection fields;
+    the conformance suite enables it alongside `zlib`; default (and any
+    embedded) builds are free of the test hooks.
+
+### Deviations from ARD (with reason)
+- None new. The counting allocator adds a test-only crate rather than
+  weakening a product crate's `unsafe_code = "forbid"`.
+- Note: the sandbox git store was reset between sessions (the six prior
+  commits were unpushed and their objects are gone); history was
+  reconstructed from the persisted working tree with the same grouping and
+  messages. Final tree is unchanged.
+
+### DoD (attempted)
+```text
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+    → NOT RUN: sandbox still has no rustup/cargo (rustup.rs TLS fails).
+    Verified by full re-read of every touched file + grep sweeps; gate runs
+    are due on a machine with the pinned 1.97.1 toolchain before merge.
+```
+
+### Open items
+- Run the DoD commands locally (WSL/midici-dev) and paste outputs here.
+- 24 h churn soak (ARD §8) — not yet run (needs a live toolchain/daemon).
+- GH release bodies for the three earliest 0.1.0 tags (cosmetic, pre-existing).
+- rand 0.8 → 0.9 migration (workspace + proptest alignment; 0.2 chore).
+- Edition 2024 (0.2 chore).
+- HUMAN GATE: Scott signs off on the 60 s liveness default + ring convention.
+
+### Next
+Local DoD run + paste outputs; then decide on pushing the branch.
+
+## Session 3 — DoD attempt + human-gate approvals — 2026-10-07
+
+### Human-gate decisions
+- Scott approves the `CiConfig::peer_timeout_ms` default of 60,000 ms. The
+  timeout remains configurable; `0` disables it.
+- Scott approves the ring length convention: every slot carries an explicit
+  byte length, and consumers preserve the entire pushed payload, including
+  any trailing `0x00` bytes. Payload length is not inferred from the last
+  non-zero byte.
+
+### DoD outputs (verbatim)
+
+Environment check:
+```text
+cargo: unavailable
+rustc: unavailable
+rustup: unavailable
+```
+
+Commands attempted from the repository root:
+```text
+$ cargo fmt --all -- --check
+/bin/bash: line 1: cargo: command not found
+(exit 127)
+
+$ cargo clippy --workspace --all-targets --all-features -- -D warnings
+/bin/bash: line 1: cargo: command not found
+(exit 127)
+
+$ cargo test --workspace --all-features
+/bin/bash: line 1: cargo: command not found
+(exit 127)
+```
+
+The local DoD run is **blocked, not passed**: this sandbox has no Rust
+installation (`cargo`, `rustc`, and `rustup` are unavailable). The three gates
+must still be run on a machine with the pinned Rust toolchain before merge;
+no compilation or test results are claimed here. GitHub Actions is also
+currently failing before runner assignment (see PR checks), so it does not
+substitute for these local results.
+
+### Open items
+- Run the three DoD commands above on a machine with the pinned Rust 1.97.1
+toolchain and append their verbatim outputs before merge.
+- 24 h churn soak (ARD §8) — not yet run (needs a live toolchain/daemon).
+- GH release bodies for the three earliest 0.1.0 tags (cosmetic, pre-existing).
+- rand 0.8 → 0.9 migration (workspace + proptest alignment; 0.2 chore).
+- Edition 2024 (0.2 chore).
+
+### Next
+Run and record the DoD gates on a Rust-enabled machine; human-gate approvals
+are recorded above.
+
+## Session 4 — PR merge request — 2026-10-07
+
+- Scott explicitly directed that PR #16 be merged while the local DoD gates
+  remain blocked by the sandbox's missing Rust toolchain and the CI jobs have
+  no assigned runners. This records the direction; it does not claim those
+  gates passed. The branch is being reconciled with the updated `main` before
+  attempting the GitHub merge.

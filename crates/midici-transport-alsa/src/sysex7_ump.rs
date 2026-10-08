@@ -8,11 +8,41 @@ use midi2::sysex7::Sysex7;
 
 use crate::error::{Result, TransportError};
 
+/// Default inbound SysEx size cap (the chunker's clamp maximum). // ARD §4
+const DEFAULT_MAX_BODY_BYTES: usize = 4096;
+
+/// Conservative word cap for a body of `max_body_bytes` bytes: at worst 3
+/// payload bytes per 2-word UMP data packet, plus a couple of packets slack.
+/// The completed-body length check in [`Sysex7Reassembler::take_complete`]
+/// tightens this for the actual packet efficiency.
+fn max_words_for(max_body_bytes: usize) -> usize {
+    max_body_bytes.saturating_add(2) / 3 * 2 + 4
+}
+
 /// Incremental reassembler for inbound SysEx7 UMP packets (2 words each).
-#[derive(Debug, Default)]
+///
+/// Bounded: buffered words are capped by our receivable max SysEx, so a
+/// sender streaming Start/Continue forever cannot grow memory without bound.
+/// // ARD §7 (chunk flood / memory DoS)
+#[derive(Debug)]
 pub struct Sysex7Reassembler {
     words: Vec<u32>,
     group: Option<u8>,
+    max_words: usize,
+    max_body_bytes: usize,
+    drops: usize,
+}
+
+impl Default for Sysex7Reassembler {
+    fn default() -> Self {
+        Self {
+            words: Vec::new(),
+            group: None,
+            max_words: max_words_for(DEFAULT_MAX_BODY_BYTES),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            drops: 0,
+        }
+    }
 }
 
 /// Completed SysEx7 body (F0/F7 stripped) with UMP group.
@@ -25,9 +55,27 @@ pub struct CompleteSysex {
 }
 
 impl Sysex7Reassembler {
-    /// Create an empty reassembler.
+    /// Create an empty reassembler (4096-byte inbound cap).
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Cap buffered inbound SysEx at `max_body_bytes` (our receivable max).
+    pub fn with_max_body_bytes(mut self, max_body_bytes: usize) -> Self {
+        self.max_body_bytes = max_body_bytes;
+        self.max_words = max_words_for(max_body_bytes);
+        self
+    }
+
+    /// Count of over-cap messages dropped since construction.
+    #[inline]
+    pub fn drops(&self) -> usize {
+        self.drops
+    }
+
+    fn reset(&mut self) {
+        self.words.clear();
+        self.group = None;
     }
 
     /// Feed one ALSA UMP event's words. Returns a complete body when the SysEx ends.
@@ -44,14 +92,22 @@ impl Sysex7Reassembler {
         let group = ((w0 >> 24) & 0xF) as u8;
         let status = ((w0 >> 20) & 0xF) as u8; // Complete/Start/Continue/End // M2-104
 
-        if status == 0x1 || self.words.is_empty() {
-            // Start (or Complete single-packet) begins a new message.
+        // Start (0x1) and Complete (0x0, single-packet) begin a new message;
+        // a Continue (0x2) or End (0x3) must extend the in-flight one. // M2-104
+        if status == 0x0 || status == 0x1 || self.words.is_empty() {
             self.words.clear();
             self.group = Some(group);
         } else if self.group != Some(group) {
             // Group change mid-message — reset.
             self.words.clear();
             self.group = Some(group);
+        }
+
+        if self.words.len() >= self.max_words {
+            // Over-cap: drop the (partial) message, keep state clean. // ARD §7
+            self.reset();
+            self.drops += 1;
+            return Ok(None);
         }
 
         self.words.push(words[0]);
@@ -72,6 +128,11 @@ impl Sysex7Reassembler {
         let borrowed = Sysex7::<&[u32]>::try_from(words.as_slice())
             .map_err(|_| TransportError::Ump("invalid SysEx7 UMP message"))?;
         let body: Vec<u8> = borrowed.payload().map(u8::from).collect();
+        if body.len() > self.max_body_bytes {
+            // Sender exceeded our receivable max — reject. // M2-101 §5.5.3
+            self.drops += 1;
+            return Err(TransportError::Ump("SysEx7 body exceeds receivable max"));
+        }
         Ok(CompleteSysex { group, body })
     }
 }

@@ -18,6 +18,9 @@ all-features = true
 default = []
 # zlib+Mcoded7 mutualEncoding — M2-103 §6.1.6 / ARD §2
 zlib = ["dep:miniz_oxide"]
+# Test-only knobs on the shipped resources (forbidden/not_allowed).
+# Never part of the default build; enabled by the conformance suite.
+test-knobs = []
 
 [dependencies]
 midici-core = { path = "../midici-core", version = "0.1.0" }
@@ -29,6 +32,7 @@ serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 [dev-dependencies]
 proptest = "1.6"
 rand = "0.8"
+midici-test-alloc = { path = "../midici-test-alloc" }
 
 [lints.rust]
 unsafe_code = "forbid"

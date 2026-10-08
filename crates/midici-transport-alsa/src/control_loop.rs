@@ -64,7 +64,7 @@ pub fn run_responder_loop(mut opts: LoopOptions) -> Result<()> {
     engine.announce_discovery();
     flush_outbound(&ep, &mut engine, group)?;
 
-    let mut reasm = Sysex7Reassembler::new();
+    let mut reasm = Sysex7Reassembler::with_max_body_bytes(cfg.max_sysex_size as usize);
     let start = Instant::now();
 
     while opts.running.load(Ordering::SeqCst) {
@@ -72,17 +72,25 @@ pub fn run_responder_loop(mut opts: LoopOptions) -> Result<()> {
         loop {
             match ep.input_ump()? {
                 None => break,
-                Some(words) => {
-                    if let Some(complete) = reasm.feed(&words)? {
-                        engine
-                            .feed_sysex(complete.group, &complete.body)
-                            .map_err(|e| TransportError::Engine(format!("{e:?}")))?;
+                Some(words) => match reasm.feed(&words) {
+                    // Inbound framing errors (invalid SysEx7, over-cap body)
+                    // must never take the daemon down: log and continue.
+                    Err(e) => {
+                        eprintln!("midici-transport-alsa: dropping malformed SysEx7: {e:?}");
+                    }
+                    Ok(None) => {}
+                    Ok(Some(complete)) => {
+                        // The engine treats all malformed input as NAK /
+                        // silent drop, but guard anyway.
+                        if let Err(e) = engine.feed_sysex(complete.group, &complete.body) {
+                            eprintln!("midici-transport-alsa: malformed inbound SysEx: {e:?}");
+                        }
                         while let Some(ev) = engine.next_event() {
                             (opts.on_event)(ev);
                         }
                         flush_outbound(&ep, &mut engine, group)?;
                     }
-                }
+                },
             }
         }
 
@@ -110,8 +118,9 @@ pub fn run_responder_loop(mut opts: LoopOptions) -> Result<()> {
     }
 
     eprintln!(
-        "midici-transport-alsa: shutting down {}",
-        ep.address_string()
+        "midici-transport-alsa: shutting down {} (dropped {} over-cap SysEx7)",
+        ep.address_string(),
+        reasm.drops()
     );
     Ok(())
 }

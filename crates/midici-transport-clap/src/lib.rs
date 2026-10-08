@@ -27,11 +27,12 @@ mod tests {
         let ring: crate::ring::Ring<64, 512> = crate::ring::Ring::new();
         let mut prod = unsafe { crate::ring::Producer::new(&ring) };
         let mut cons = unsafe { crate::ring::Consumer::new(&ring) };
-        let body = [0x7E, 0x7F, 0x0D, 0x70, 0x02];
+        // Body ends in 0x00: the per-slot length (not a non-zero scan) must
+        // deliver it intact.
+        let body = [0x7E, 0x7F, 0x0D, 0x70, 0x02, 0x00];
         assert!(prod.push(&body));
         let data = cons.peek().unwrap();
-        let len = data.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
-        assert_eq!(&data[..len], &body[..]);
+        assert_eq!(data, &body[..]);
         cons.commit();
     }
 }

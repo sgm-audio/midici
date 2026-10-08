@@ -69,7 +69,7 @@ pub use chunker::{
 };
 pub use controller::{InquiryKind, NotifyBody, PeController, PeEvent};
 pub use error::PeError;
-pub use frame::{PeChunk, PE_FRAMING_LEN, REQUEST_ID_MAX};
+pub use frame::{PeChunk, PeChunkRef, PE_FRAMING_LEN, REQUEST_ID_MAX};
 pub use json_header::{
     encode_inquiry_header, encode_reply_header, encode_set_inquiry_header, encode_sub_reply_header,
     encode_subscription_header, parse_get_inquiry_header, parse_notify_header,

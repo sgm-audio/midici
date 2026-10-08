@@ -67,6 +67,55 @@ fn require_7bit_bytes(bytes: &[u8]) -> Result<(), CiError> {
     }
 }
 
+/// Shared identity block of Discovery / Reply to Discovery. // M2-101 §5.5.1 / §5.6
+///
+/// 16 base bytes; `output_path_id` is appended on Message Format Version 2.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct IdentityFields {
+    manufacturer: [u8; 3],
+    family: u16,
+    model: u16,
+    software_revision: [u8; 4],
+    category_supported: u8,
+    max_sysex_size: u32,
+    output_path_id: u8,
+}
+
+fn decode_identity(data: &[u8], v2: bool) -> Result<IdentityFields, CiError> {
+    let need = if v2 { 17 } else { 16 };
+    if data.len() < need {
+        return Err(CiError::BadLength);
+    }
+    require_7bit_bytes(&data[..need])?;
+    let max_sysex_size = read_u32_le7(&data[12..16])?;
+    require_min_sysex(max_sysex_size)?;
+    Ok(IdentityFields {
+        manufacturer: [data[0], data[1], data[2]],
+        family: read_u16_le7(&data[3..5])?,
+        model: read_u16_le7(&data[5..7])?,
+        software_revision: [data[7], data[8], data[9], data[10]],
+        category_supported: data[11],
+        max_sysex_size,
+        output_path_id: if v2 { data[16] } else { 0 },
+    })
+}
+
+fn encode_identity(d: &mut [u8], f: &IdentityFields, v2: bool) -> Result<(), CiError> {
+    require_min_sysex(f.max_sysex_size)?;
+    require_7bit_bytes(&f.manufacturer)?;
+    require_7bit_bytes(&f.software_revision)?;
+    d[0..3].copy_from_slice(&f.manufacturer);
+    write_u16_le7(f.family, &mut d[3..5])?;
+    write_u16_le7(f.model, &mut d[5..7])?;
+    d[7..11].copy_from_slice(&f.software_revision);
+    d[11] = f.category_supported & 0x7F;
+    write_u32_le7(f.max_sysex_size, &mut d[12..16])?;
+    if v2 {
+        d[16] = f.output_path_id & 0x7F;
+    }
+    Ok(())
+}
+
 /// Discovery message fields (after header). // M2-101 §5.5 Table 6
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Discovery {
@@ -88,43 +137,35 @@ pub struct Discovery {
 }
 
 impl Discovery {
+    fn identity(&self) -> IdentityFields {
+        IdentityFields {
+            manufacturer: self.manufacturer,
+            family: self.family,
+            model: self.model,
+            software_revision: self.software_revision,
+            category_supported: self.category_supported,
+            max_sysex_size: self.max_sysex_size,
+            output_path_id: self.output_path_id,
+        }
+    }
+
     /// Decode Discovery from a full F0/F7-stripped body. // M2-101 §5.5 Table 6
     pub fn decode(body: &[u8]) -> Result<Self, CiError> {
         let (header, data) = CiHeader::decode(body)?;
         if header.sub_id2 != SUB_ID2_DISCOVERY {
             return Err(CiError::UnsupportedSubId2(header.sub_id2));
         }
-        // v1 payload 16 bytes; v2 adds Output Path ID. // M2-101 §5.5 Table 6
-        let need = if header.version >= MESSAGE_FORMAT_VERSION_1_2 {
-            17
-        } else {
-            16
-        };
-        if data.len() < need {
-            return Err(CiError::BadLength);
-        }
-        require_7bit_bytes(&data[..need])?;
-        let manufacturer = [data[0], data[1], data[2]];
-        let family = read_u16_le7(&data[3..5])?;
-        let model = read_u16_le7(&data[5..7])?;
-        let software_revision = [data[7], data[8], data[9], data[10]];
-        let category_supported = data[11];
-        let max_sysex_size = read_u32_le7(&data[12..16])?;
-        require_min_sysex(max_sysex_size)?;
-        let output_path_id = if header.version >= MESSAGE_FORMAT_VERSION_1_2 {
-            data[16]
-        } else {
-            0
-        };
+        let v2 = header.version >= MESSAGE_FORMAT_VERSION_1_2;
+        let f = decode_identity(data, v2)?;
         Ok(Self {
             header,
-            manufacturer,
-            family,
-            model,
-            software_revision,
-            category_supported,
-            max_sysex_size,
-            output_path_id,
+            manufacturer: f.manufacturer,
+            family: f.family,
+            model: f.model,
+            software_revision: f.software_revision,
+            category_supported: f.category_supported,
+            max_sysex_size: f.max_sysex_size,
+            output_path_id: f.output_path_id,
         })
     }
 
@@ -135,22 +176,10 @@ impl Discovery {
         if out.len() < total {
             return Err(CiError::BufferTooSmall);
         }
-        require_min_sysex(self.max_sysex_size)?;
         let mut h = self.header;
         h.sub_id2 = SUB_ID2_DISCOVERY;
         h.encode(out)?;
-        let d = &mut out[CI_HEADER_LEN..];
-        require_7bit_bytes(&self.manufacturer)?;
-        require_7bit_bytes(&self.software_revision)?;
-        d[0..3].copy_from_slice(&self.manufacturer);
-        write_u16_le7(self.family, &mut d[3..5])?;
-        write_u16_le7(self.model, &mut d[5..7])?;
-        d[7..11].copy_from_slice(&self.software_revision);
-        d[11] = self.category_supported & 0x7F;
-        write_u32_le7(self.max_sysex_size, &mut d[12..16])?;
-        if v2 {
-            d[16] = self.output_path_id & 0x7F;
-        }
+        encode_identity(&mut out[CI_HEADER_LEN..], &self.identity(), v2)?;
         Ok(total)
     }
 }
@@ -172,40 +201,41 @@ pub struct ReplyToDiscovery {
 }
 
 impl ReplyToDiscovery {
+    fn identity(&self) -> IdentityFields {
+        IdentityFields {
+            manufacturer: self.manufacturer,
+            family: self.family,
+            model: self.model,
+            software_revision: self.software_revision,
+            category_supported: self.category_supported,
+            max_sysex_size: self.max_sysex_size,
+            output_path_id: self.output_path_id,
+        }
+    }
+
     pub fn decode(body: &[u8]) -> Result<Self, CiError> {
         let (header, data) = CiHeader::decode(body)?;
         if header.sub_id2 != SUB_ID2_REPLY_TO_DISCOVERY {
             return Err(CiError::UnsupportedSubId2(header.sub_id2));
         }
-        let need = if header.version >= MESSAGE_FORMAT_VERSION_1_2 {
-            18
-        } else {
-            16
-        };
+        let v2 = header.version >= MESSAGE_FORMAT_VERSION_1_2;
+        // v2 payload: identity (17) + Function Block (1). // M2-101 §5.6 Table 8
+        let need = if v2 { 18 } else { 16 };
         if data.len() < need {
             return Err(CiError::BadLength);
         }
         require_7bit_bytes(&data[..need])?;
-        let max_sysex_size = read_u32_le7(&data[12..16])?;
-        require_min_sysex(max_sysex_size)?;
+        let f = decode_identity(data, v2)?;
         Ok(Self {
             header,
-            manufacturer: [data[0], data[1], data[2]],
-            family: read_u16_le7(&data[3..5])?,
-            model: read_u16_le7(&data[5..7])?,
-            software_revision: [data[7], data[8], data[9], data[10]],
-            category_supported: data[11],
-            max_sysex_size,
-            output_path_id: if header.version >= MESSAGE_FORMAT_VERSION_1_2 {
-                data[16]
-            } else {
-                0
-            },
-            function_block: if header.version >= MESSAGE_FORMAT_VERSION_1_2 {
-                data[17]
-            } else {
-                DEVICE_ID_FUNCTION_BLOCK
-            },
+            manufacturer: f.manufacturer,
+            family: f.family,
+            model: f.model,
+            software_revision: f.software_revision,
+            category_supported: f.category_supported,
+            max_sysex_size: f.max_sysex_size,
+            output_path_id: f.output_path_id,
+            function_block: if v2 { data[17] } else { DEVICE_ID_FUNCTION_BLOCK },
         })
     }
 
@@ -215,21 +245,12 @@ impl ReplyToDiscovery {
         if out.len() < total {
             return Err(CiError::BufferTooSmall);
         }
-        require_min_sysex(self.max_sysex_size)?;
         let mut h = self.header;
         h.sub_id2 = SUB_ID2_REPLY_TO_DISCOVERY;
         h.encode(out)?;
         let d = &mut out[CI_HEADER_LEN..];
-        require_7bit_bytes(&self.manufacturer)?;
-        require_7bit_bytes(&self.software_revision)?;
-        d[0..3].copy_from_slice(&self.manufacturer);
-        write_u16_le7(self.family, &mut d[3..5])?;
-        write_u16_le7(self.model, &mut d[5..7])?;
-        d[7..11].copy_from_slice(&self.software_revision);
-        d[11] = self.category_supported & 0x7F;
-        write_u32_le7(self.max_sysex_size, &mut d[12..16])?;
+        encode_identity(d, &self.identity(), v2)?;
         if v2 {
-            d[16] = self.output_path_id & 0x7F;
             d[17] = self.function_block & 0x7F;
         }
         Ok(total)
@@ -423,6 +444,55 @@ fn encode_ack_nak_body(body: &AckNakBody<'_>, out: &mut [u8]) -> Result<usize, C
     Ok(total)
 }
 
+/// v1.1 ACK/NAK body: header-only, no status fields. // M2-101 §5.10 / §5.11
+const V1_1_EMPTY_BODY: AckNakBody<'static> = AckNakBody {
+    original_sub_id2: 0,
+    status_code: 0,
+    status_data: 0,
+    details: [0; 5],
+    message: &[],
+};
+
+/// Shared decode for the two message-format versions of ACK and NAK,
+/// which differ only in their Sub-ID#2. // M2-101 §5.10 / §5.11
+fn decode_ack_nak(
+    body: &[u8],
+    expected_sub_id2: u8,
+) -> Result<(CiHeader, AckNakBody<'_>), CiError> {
+    let (header, data) = CiHeader::decode(body)?;
+    if header.sub_id2 != expected_sub_id2 {
+        return Err(CiError::UnsupportedSubId2(header.sub_id2));
+    }
+    // Status / body fields were added in Message Format Version 2.
+    // v1.1 is header-only. // M2-101 §5.10 / §5.11
+    if header.version < MESSAGE_FORMAT_VERSION_1_2 {
+        if !data.is_empty() {
+            return Err(CiError::BadLength);
+        }
+        return Ok((header, V1_1_EMPTY_BODY));
+    }
+    Ok((header, decode_ack_nak_body(data)?))
+}
+
+/// Shared encode for ACK and NAK (see [`decode_ack_nak`]).
+fn encode_ack_nak(
+    out: &mut [u8],
+    mut header: CiHeader,
+    expected_sub_id2: u8,
+    body: &AckNakBody<'_>,
+) -> Result<usize, CiError> {
+    if out.len() < CI_HEADER_LEN {
+        return Err(CiError::BufferTooSmall);
+    }
+    header.sub_id2 = expected_sub_id2;
+    header.encode(out)?;
+    if header.version < MESSAGE_FORMAT_VERSION_1_2 {
+        return Ok(CI_HEADER_LEN);
+    }
+    let n = encode_ack_nak_body(body, &mut out[CI_HEADER_LEN..])?;
+    Ok(CI_HEADER_LEN + n)
+}
+
 /// MIDI-CI ACK. // M2-101 §5.10 Table 13
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ack<'a> {
@@ -432,45 +502,12 @@ pub struct Ack<'a> {
 
 impl<'a> Ack<'a> {
     pub fn decode(body: &'a [u8]) -> Result<Self, CiError> {
-        let (header, data) = CiHeader::decode(body)?;
-        if header.sub_id2 != SUB_ID2_ACK {
-            return Err(CiError::UnsupportedSubId2(header.sub_id2));
-        }
-        // Status / body fields were added in Message Format Version 2.
-        // v1.1 ACK is header-only (same as v1.1 NAK). // M2-101 §5.10 / §5.11
-        if header.version < MESSAGE_FORMAT_VERSION_1_2 {
-            if !data.is_empty() {
-                return Err(CiError::BadLength);
-            }
-            return Ok(Self {
-                header,
-                body: AckNakBody {
-                    original_sub_id2: 0,
-                    status_code: 0,
-                    status_data: 0,
-                    details: [0; 5],
-                    message: &[],
-                },
-            });
-        }
-        Ok(Self {
-            header,
-            body: decode_ack_nak_body(data)?,
-        })
+        decode_ack_nak(body, SUB_ID2_ACK)
+            .map(|(header, body)| Self { header, body })
     }
 
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, CiError> {
-        if out.len() < CI_HEADER_LEN {
-            return Err(CiError::BufferTooSmall);
-        }
-        let mut h = self.header;
-        h.sub_id2 = SUB_ID2_ACK;
-        h.encode(out)?;
-        if h.version < MESSAGE_FORMAT_VERSION_1_2 {
-            return Ok(CI_HEADER_LEN);
-        }
-        let n = encode_ack_nak_body(&self.body, &mut out[CI_HEADER_LEN..])?;
-        Ok(CI_HEADER_LEN + n)
+        encode_ack_nak(out, self.header, SUB_ID2_ACK, &self.body)
     }
 }
 
@@ -483,44 +520,12 @@ pub struct Nak<'a> {
 
 impl<'a> Nak<'a> {
     pub fn decode(body: &'a [u8]) -> Result<Self, CiError> {
-        let (header, data) = CiHeader::decode(body)?;
-        if header.sub_id2 != SUB_ID2_NAK {
-            return Err(CiError::UnsupportedSubId2(header.sub_id2));
-        }
-        // Status fields were added in Message Format Version 2. // M2-101 §5.11 Table 15
-        if header.version < MESSAGE_FORMAT_VERSION_1_2 {
-            if !data.is_empty() {
-                return Err(CiError::BadLength);
-            }
-            return Ok(Self {
-                header,
-                body: AckNakBody {
-                    original_sub_id2: 0,
-                    status_code: 0,
-                    status_data: 0,
-                    details: [0; 5],
-                    message: &[],
-                },
-            });
-        }
-        Ok(Self {
-            header,
-            body: decode_ack_nak_body(data)?,
-        })
+        decode_ack_nak(body, SUB_ID2_NAK)
+            .map(|(header, body)| Self { header, body })
     }
 
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, CiError> {
-        if out.len() < CI_HEADER_LEN {
-            return Err(CiError::BufferTooSmall);
-        }
-        let mut h = self.header;
-        h.sub_id2 = SUB_ID2_NAK;
-        h.encode(out)?;
-        if h.version < MESSAGE_FORMAT_VERSION_1_2 {
-            return Ok(CI_HEADER_LEN);
-        }
-        let n = encode_ack_nak_body(&self.body, &mut out[CI_HEADER_LEN..])?;
-        Ok(CI_HEADER_LEN + n)
+        encode_ack_nak(out, self.header, SUB_ID2_NAK, &self.body)
     }
 }
 

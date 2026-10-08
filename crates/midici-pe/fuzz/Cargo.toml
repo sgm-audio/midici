@@ -11,6 +11,8 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 midici-pe = { path = ".." }
 midici-core = { path = "../../midici-core" }
+# Same rand_core major as midici-core (RngCore trait must match for fuzz targets).
+rand_core = { version = "0.6.4", default-features = false }
 
 [workspace]
 members = ["."]
@@ -25,6 +27,20 @@ bench = false
 [[bin]]
 name = "fuzz_reassemble"
 path = "fuzz_targets/fuzz_reassemble.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_ci_header"
+path = "fuzz_targets/fuzz_ci_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_pe_json_header"
+path = "fuzz_targets/fuzz_pe_json_header.rs"
 test = false
 doc = false
 bench = false

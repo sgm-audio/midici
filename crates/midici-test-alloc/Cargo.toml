@@ -1,0 +1,21 @@
+[package]
+name = "midici-test-alloc"
+description = "Counting global allocator for no-allocation test harnesses (test-only, not published)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints.rust]
+# This crate exists to host a counting `GlobalAlloc` implementation, which
+# is inherently `unsafe`. Every product crate keeps `unsafe_code =
+# "forbid"`; this test-only crate is the single audited exception — it
+# forwards every call to the standard `System` allocator unchanged and adds
+# only a live-allocation counter.
+unsafe_code = "allow"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

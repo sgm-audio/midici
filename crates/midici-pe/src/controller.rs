@@ -13,19 +13,19 @@ use midici_core::spec::{
     SUB_ID2_PE_SET_INQUIRY, SUB_ID2_PE_SET_REPLY, SUB_ID2_PE_SUBSCRIPTION,
     SUB_ID2_PE_SUBSCRIPTION_REPLY,
 };
-use midici_core::{
-    pe_caps_reply, CiError, CiHeader, Muid, OutboundSysex, PeCapabilities, PeMessage,
-};
+use midici_core::{pe_caps_reply, CiError, CiHeader, Muid, OutboundSysex, PeCapabilities};
 
 use crate::chunker::split;
-use crate::frame::PeChunk;
+use crate::frame::PeChunkRef;
 use crate::json_header::{
     encode_reply_header, encode_sub_reply_header, encode_subscription_header,
     parse_get_inquiry_header, parse_notify_header, parse_set_inquiry_header,
     parse_subscription_header, GetInquiryHeader, SetInquiryHeader, SubCommand,
     NOTIFY_STATUS_TERMINATE,
 };
-use crate::reassembler::{ReassembleEvent, Reassembler, MAX_TX_BYTES};
+use crate::reassembler::{
+    ReassembleEvent, Reassembler, MAX_CONCURRENT_PER_PEER, MAX_TX_BYTES,
+};
 use crate::registry::ResourceRegistry;
 use crate::resource::PeQuery;
 use crate::status::PeStatus;
@@ -51,6 +51,18 @@ impl InquiryKind {
             Self::Subscription => SUB_ID2_PE_SUBSCRIPTION_REPLY,
         }
     }
+}
+
+/// Correlation context for one inbound inquiry and its replies. Keeps the
+/// reply path from threading six scalars through every error arm.
+#[derive(Clone, Copy, Debug)]
+struct ReplyCtx {
+    kind: InquiryKind,
+    our_muid: Muid,
+    peer: Muid,
+    group: u8,
+    request_id: u8,
+    max_sysex: u32,
 }
 
 /// Body shape of an outbound subscription update. // M2-103 §11.1
@@ -204,7 +216,17 @@ impl PeController {
         }
     }
 
-    pub fn poll(&mut self, our_muid: Muid, peer_max_sysex: u32, group: u8, now_ms: u64) {
+    /// Drive reassembler timeouts. `peer_max` holds the per-peer negotiated
+    /// max SysEx for timeout NAK chunking (falls back to `default_max_sysex`
+    /// for peers without a row).
+    pub fn poll(
+        &mut self,
+        our_muid: Muid,
+        peer_max: &[(Muid, u32)],
+        default_max_sysex: u32,
+        group: u8,
+        now_ms: u64,
+    ) {
         let events = self.reassembler.poll(now_ms);
         for ev in events {
             if let ReassembleEvent::Timeout { peer, request_id } = ev {
@@ -212,18 +234,21 @@ impl PeController {
                     .take_active(peer, request_id)
                     .map(|tx| tx.kind)
                     .unwrap_or(InquiryKind::Get);
+                let max_sysex = peer_max
+                    .iter()
+                    .find(|(m, _)| *m == peer)
+                    .map(|(_, s)| *s)
+                    .unwrap_or(default_max_sysex);
                 // Stalled multi-chunk → PE status 341. // ARD §7 / M2-103 §7.4.1
-                let _ = self.queue_reply_simple(
+                let ctx = ReplyCtx {
                     kind,
                     our_muid,
                     peer,
                     group,
                     request_id,
-                    peer_max_sysex,
-                    PeStatus::Unavailable,
-                    None,
-                    &[],
-                );
+                    max_sysex,
+                };
+                let _ = self.reply(&ctx, PeStatus::Unavailable, None, &[]);
             }
         }
     }
@@ -309,23 +334,31 @@ impl PeController {
         body: &[u8],
         now_ms: u64,
     ) -> Result<(), CiError> {
-        let msg = PeMessage::decode(body)?;
-        let peer = msg.header.source;
-        let chunk = match PeChunk::decode(&msg.pe_payload) {
+        // Decode the CI header once; the PE payload stays a borrowed slice
+        // for the whole hot path (no per-chunk heap copies). // ARD §3
+        let (header, pe_payload) = CiHeader::decode(body)?;
+        let peer = header.source;
+        let chunk = match PeChunkRef::decode(pe_payload) {
             Ok(c) => c,
             Err(_) => {
-                return self.queue_reply_simple(
+                let ctx = ReplyCtx {
                     kind,
                     our_muid,
                     peer,
                     group,
-                    0,
-                    peer_max_sysex,
-                    PeStatus::BadRequest,
-                    None,
-                    &[],
-                );
+                    request_id: 0,
+                    max_sysex: peer_max_sysex,
+                };
+                return self.reply(&ctx, PeStatus::BadRequest, None, &[]);
             }
+        };
+        let ctx = ReplyCtx {
+            kind,
+            our_muid,
+            peer,
+            group,
+            request_id: chunk.request_id,
+            max_sysex: peer_max_sysex,
         };
 
         // Ensure peer PE record exists (default simultaneous if Caps skipped).
@@ -341,31 +374,21 @@ impl PeController {
         // Cap concurrent requests before accepting. // ARD §7 → PeStatus::Busy (445)
         let is_new = self
             .peer_mut(peer)
-            .map(|p| !p.active.iter().any(|t| t.request_id == chunk.request_id))
+            .map(|p| !p.active.iter().any(|t| t.request_id == ctx.request_id))
             .unwrap_or(true);
         if is_new {
             if let Some(p) = self.peer_mut(peer) {
                 if p.active.len() as u8 >= p.simultaneous {
-                    return self.queue_reply_simple(
-                        kind,
-                        our_muid,
-                        peer,
-                        group,
-                        chunk.request_id,
-                        peer_max_sysex,
-                        PeStatus::Busy,
-                        None,
-                        &[],
-                    );
+                    return self.reply(&ctx, PeStatus::Busy, None, &[]);
                 }
                 p.active.push(ActiveTx {
-                    request_id: chunk.request_id,
+                    request_id: ctx.request_id,
                     kind,
                 });
             }
         }
 
-        match self.reassembler.feed(peer, &msg.pe_payload, now_ms) {
+        match self.reassembler.feed_chunk(peer, &chunk, now_ms) {
             Ok(None) => Ok(()),
             Ok(Some(ReassembleEvent::Complete {
                 request_id,
@@ -374,33 +397,16 @@ impl PeController {
                 ..
             })) => {
                 self.take_active(peer, request_id);
-                self.complete_inquiry(
-                    kind,
-                    our_muid,
-                    peer,
-                    group,
-                    request_id,
-                    peer_max_sysex,
-                    &header,
-                    &prop,
-                )
+                let ctx = ReplyCtx { request_id, ..ctx };
+                self.complete_inquiry(&ctx, &header, &prop)
             }
             Ok(Some(ReassembleEvent::Timeout { request_id, .. })) => {
                 self.take_active(peer, request_id);
-                self.queue_reply_simple(
-                    kind,
-                    our_muid,
-                    peer,
-                    group,
-                    request_id,
-                    peer_max_sysex,
-                    PeStatus::Unavailable,
-                    None,
-                    &[],
-                )
+                let ctx = ReplyCtx { request_id, ..ctx };
+                self.reply(&ctx, PeStatus::Unavailable, None, &[])
             }
             Err(e) => {
-                self.take_active(peer, chunk.request_id);
+                self.take_active(peer, ctx.request_id);
                 // Peer table pressure ≠ per-peer busy (445). // M2-103 §7.4.1 status 341
                 let st = match e {
                     crate::error::PeError::Oversize => PeStatus::PayloadTooLarge,
@@ -408,153 +414,55 @@ impl PeController {
                     crate::error::PeError::PeerTableFull => PeStatus::Unavailable,
                     _ => PeStatus::BadRequest,
                 };
-                self.queue_reply_simple(
-                    kind,
-                    our_muid,
-                    peer,
-                    group,
-                    chunk.request_id,
-                    peer_max_sysex,
-                    st,
-                    None,
-                    &[],
-                )
+                self.reply(&ctx, st, None, &[])
             }
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn complete_inquiry(
         &mut self,
-        kind: InquiryKind,
-        our_muid: Muid,
-        peer: Muid,
-        group: u8,
-        request_id: u8,
-        peer_max_sysex: u32,
+        ctx: &ReplyCtx,
         header_bytes: &[u8],
         prop: &[u8],
     ) -> Result<(), CiError> {
-        match kind {
+        match ctx.kind {
             InquiryKind::Get => {
                 let inquiry = match parse_get_inquiry_header(header_bytes) {
                     Ok(h) => h,
-                    Err(st) => {
-                        return self.queue_reply_simple(
-                            kind,
-                            our_muid,
-                            peer,
-                            group,
-                            request_id,
-                            peer_max_sysex,
-                            st,
-                            None,
-                            &[],
-                        );
-                    }
+                    Err(st) => return self.reply(ctx, st, None, &[]),
                 };
-                self.serve_get(our_muid, peer, group, request_id, peer_max_sysex, &inquiry)
+                self.serve_get(ctx, &inquiry)
             }
-            InquiryKind::Set => self.complete_set(
-                our_muid,
-                peer,
-                group,
-                request_id,
-                peer_max_sysex,
-                header_bytes,
-                prop,
-            ),
-            InquiryKind::Subscription => self.complete_subscription(
-                our_muid,
-                peer,
-                group,
-                request_id,
-                peer_max_sysex,
-                header_bytes,
-            ),
+            InquiryKind::Set => self.complete_set(ctx, header_bytes, prop),
+            InquiryKind::Subscription => self.complete_subscription(ctx, header_bytes),
         }
     }
 
-    fn serve_get(
-        &mut self,
-        our_muid: Muid,
-        peer: Muid,
-        group: u8,
-        request_id: u8,
-        peer_max_sysex: u32,
-        inquiry: &GetInquiryHeader,
-    ) -> Result<(), CiError> {
+    fn serve_get(&mut self, ctx: &ReplyCtx, inquiry: &GetInquiryHeader) -> Result<(), CiError> {
         let query = PeQuery {
             res_id: inquiry.res_id.clone(),
         };
         match self.registry.get(&inquiry.resource, &query) {
             Ok(payload) => {
                 if payload.body.len() > MAX_TX_BYTES {
-                    self.queue_reply_simple(
-                        InquiryKind::Get,
-                        our_muid,
-                        peer,
-                        group,
-                        request_id,
-                        peer_max_sysex,
-                        PeStatus::PayloadTooLarge,
-                        None,
-                        &[],
-                    )
+                    self.reply(ctx, PeStatus::PayloadTooLarge, None, &[])
                 } else {
-                    self.queue_reply_simple(
-                        InquiryKind::Get,
-                        our_muid,
-                        peer,
-                        group,
-                        request_id,
-                        peer_max_sysex,
-                        PeStatus::Ok,
-                        None,
-                        &payload.body,
-                    )
+                    self.reply(ctx, PeStatus::Ok, None, &payload.body)
                 }
             }
-            Err(st) => self.queue_reply_simple(
-                InquiryKind::Get,
-                our_muid,
-                peer,
-                group,
-                request_id,
-                peer_max_sysex,
-                st,
-                None,
-                &[],
-            ),
+            Err(st) => self.reply(ctx, st, None, &[]),
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn complete_set(
         &mut self,
-        our_muid: Muid,
-        peer: Muid,
-        group: u8,
-        request_id: u8,
-        peer_max_sysex: u32,
+        ctx: &ReplyCtx,
         header_bytes: &[u8],
         prop: &[u8],
     ) -> Result<(), CiError> {
         let inquiry: SetInquiryHeader = match parse_set_inquiry_header(header_bytes) {
             Ok(h) => h,
-            Err(st) => {
-                return self.queue_reply_simple(
-                    InquiryKind::Set,
-                    our_muid,
-                    peer,
-                    group,
-                    request_id,
-                    peer_max_sysex,
-                    st,
-                    None,
-                    &[],
-                );
-            }
+            Err(st) => return self.reply(ctx, st, None, &[]),
         };
         let query = PeQuery {
             res_id: inquiry.res_id.clone(),
@@ -564,71 +472,34 @@ impl PeController {
             Ok(()) => PeStatus::Ok,
             Err(st) => st,
         };
-        let r = self.queue_reply_simple(
-            InquiryKind::Set,
-            our_muid,
-            peer,
-            group,
-            request_id,
-            peer_max_sysex,
-            reply_status,
-            None,
-            &[],
-        );
+        let r = self.reply(ctx, reply_status, None, &[]);
         // Set succeeded → event + Notify fan-out (responder-originated "notify";
         // initiators re-Get). // M2-103 §11 (updates after Set) / §11.1
         if reply_status == PeStatus::Ok {
             self.push_event(PeEvent::PropertySet {
-                peer,
-                request_id,
+                peer: ctx.peer,
+                request_id: ctx.request_id,
                 resource: inquiry.resource.clone(),
                 res_id: inquiry.res_id.clone(),
                 set_partial: inquiry.set_partial,
                 body: prop.to_vec(),
             });
-            self.notify_resource_changed(our_muid, &inquiry.resource, NotifyBody::Notify);
+            self.notify_resource_changed(ctx.our_muid, &inquiry.resource, NotifyBody::Notify);
         }
         r
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn complete_subscription(
         &mut self,
-        our_muid: Muid,
-        peer: Muid,
-        group: u8,
-        request_id: u8,
-        peer_max_sysex: u32,
+        ctx: &ReplyCtx,
         header_bytes: &[u8],
     ) -> Result<(), CiError> {
         let header = match parse_subscription_header(header_bytes) {
             Ok(h) => h,
-            Err(st) => {
-                return self.queue_reply_simple(
-                    InquiryKind::Subscription,
-                    our_muid,
-                    peer,
-                    group,
-                    request_id,
-                    peer_max_sysex,
-                    st,
-                    None,
-                    &[],
-                );
-            }
+            Err(st) => return self.reply(ctx, st, None, &[]),
         };
         let reply = |me: &mut Self, status: PeStatus, sub: Option<SubId>| {
-            me.queue_reply_simple(
-                InquiryKind::Subscription,
-                our_muid,
-                peer,
-                group,
-                request_id,
-                peer_max_sysex,
-                status,
-                sub,
-                &[],
-            )
+            me.reply(ctx, status, sub, &[])
         };
         match header.command {
             Some(SubCommand::Start) => {
@@ -643,15 +514,15 @@ impl PeController {
                     return reply(self, PeStatus::NotAllowed, None);
                 }
                 match self.subs.start(
-                    peer,
-                    group,
-                    peer_max_sysex,
+                    ctx.peer,
+                    ctx.group,
+                    ctx.max_sysex,
                     &resource,
                     header.res_id.as_deref(),
                 ) {
                     Ok(sub) => {
                         self.push_event(PeEvent::SubscribeStart {
-                            peer,
+                            peer: ctx.peer,
                             resource: resource.clone(),
                             res_id: header.res_id.clone(),
                             sub,
@@ -666,10 +537,10 @@ impl PeController {
                     Some(s) if !s.is_empty() => s,
                     _ => return reply(self, PeStatus::BadRequest, None),
                 };
-                match self.subs.end(peer, id) {
+                match self.subs.end(ctx.peer, id) {
                     Some(sub) => {
                         self.push_event(PeEvent::SubscribeEnd {
-                            peer,
+                            peer: ctx.peer,
                             sub: sub.id,
                             resource: sub.resource,
                         });
@@ -688,22 +559,22 @@ impl PeController {
 
     /// Legacy Notify (0x3F) — receive-only. // M2-103 §12; M2-101 §8.13
     fn on_notify(&mut self, body: &[u8]) -> Result<(), CiError> {
-        let msg = match PeMessage::decode(body) {
-            Ok(m) => m,
+        let (ci_header, pe_payload) = match CiHeader::decode(body) {
+            Ok(h) => h,
             Err(_) => return Ok(()),
         };
-        let chunk = match PeChunk::decode(&msg.pe_payload) {
+        let chunk = match PeChunkRef::decode(pe_payload) {
             Ok(c) => c,
             Err(_) => return Ok(()),
         };
-        let header = match parse_notify_header(&chunk.header) {
+        let header = match parse_notify_header(chunk.header) {
             Ok(h) => h,
             Err(_) => return Ok(()),
         };
         if header.status == NOTIFY_STATUS_TERMINATE {
             // Terminate the inquiry for this Request ID immediately. // M2-103 §12.1.3
-            let _ = self.reassembler.cancel(msg.header.source, chunk.request_id);
-            self.take_active(msg.header.source, chunk.request_id);
+            let _ = self.reassembler.cancel(ci_header.source, chunk.request_id);
+            self.take_active(ci_header.source, chunk.request_id);
         }
         // 100 (timeout wait) / 408 (timeout) are initiator-side niceties; the
         // responder side has no pending initiator transactions in v1.
@@ -712,20 +583,14 @@ impl PeController {
 
     /// Queue a reply: header first (`{"status":…}`, optionally subscribeId).
     /// // M2-103 §7.1 first-property rule / §11.2
-    #[allow(clippy::too_many_arguments)]
-    fn queue_reply_simple(
+    fn reply(
         &mut self,
-        kind: InquiryKind,
-        our_muid: Muid,
-        dest: Muid,
-        group: u8,
-        request_id: u8,
-        max_sysex: u32,
+        ctx: &ReplyCtx,
         status: PeStatus,
         sub: Option<SubId>,
         property: &[u8],
     ) -> Result<(), CiError> {
-        let header = match kind {
+        let header = match ctx.kind {
             InquiryKind::Subscription => {
                 encode_sub_reply_header(status, sub.as_ref().map(SubId::as_str), None)
             }
@@ -733,9 +598,15 @@ impl PeController {
         }
         .map_err(|_| CiError::BadField)?;
         let chunks =
-            split(request_id, &header, property, max_sysex).map_err(|_| CiError::BadField)?;
+            split(ctx.request_id, &header, property, ctx.max_sysex).map_err(|_| CiError::BadField)?;
         for pe_payload in chunks {
-            self.queue_pe(group, kind.reply_sub_id2(), our_muid, dest, &pe_payload)?;
+            self.queue_pe(
+                ctx.group,
+                ctx.kind.reply_sub_id2(),
+                ctx.our_muid,
+                ctx.peer,
+                &pe_payload,
+            )?;
         }
         Ok(())
     }
@@ -748,30 +619,28 @@ impl PeController {
         dest: Muid,
         pe_payload: &[u8],
     ) -> Result<(), CiError> {
-        let msg = PeMessage {
-            header: CiHeader {
-                device_id: DEVICE_ID_FUNCTION_BLOCK,
-                sub_id2,
-                version: MESSAGE_FORMAT_VERSION_1_2,
-                source,
-                dest,
-            },
-            pe_payload: pe_payload.to_vec(),
+        // Write the CI header and payload straight into the encode buffer —
+        // no intermediate owned `PeMessage` (or per-chunk payload clone). // ARD §3
+        let header = CiHeader {
+            device_id: DEVICE_ID_FUNCTION_BLOCK,
+            sub_id2,
+            version: MESSAGE_FORMAT_VERSION_1_2,
+            source,
+            dest,
         };
-        let need = midici_core::spec::CI_HEADER_LEN + msg.pe_payload.len();
+        let need = midici_core::spec::CI_HEADER_LEN + pe_payload.len();
         if self.encode_buf.len() < need {
             self.encode_buf.resize(need, 0);
         }
-        let n = msg.encode(&mut self.encode_buf)?;
-        let body = self.encode_buf[..n].to_vec();
-        self.push_out(group, &body);
+        header.encode(&mut self.encode_buf)?;
+        self.encode_buf[midici_core::spec::CI_HEADER_LEN..need].copy_from_slice(pe_payload);
+        self.push_out(group, &self.encode_buf[..need]);
         Ok(())
     }
 
     fn queue_msg(&mut self, group: u8, msg: &PeCapabilities) -> Result<(), CiError> {
         let n = msg.encode(&mut self.encode_buf)?;
-        let body = self.encode_buf[..n].to_vec();
-        self.push_out(group, &body);
+        self.push_out(group, &self.encode_buf[..n]);
         Ok(())
     }
 
@@ -813,7 +682,9 @@ impl PeController {
             simultaneous: simultaneous.max(1),
             pe_major,
             pe_minor,
-            active: Vec::new(),
+            // Pre-reserve the in-flight list: chunks from a fresh peer must
+            // not allocate. // ARD §3 (RT no-alloc budget)
+            active: Vec::with_capacity(MAX_CONCURRENT_PER_PEER),
         });
     }
 

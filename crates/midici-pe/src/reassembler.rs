@@ -35,7 +35,7 @@ use alloc::vec::Vec;
 use midici_core::Muid;
 
 use crate::error::PeError;
-use crate::frame::PeChunk;
+use crate::frame::PeChunkRef;
 
 /// Cap on reassembled property bytes per `(peer, requestId)`. // ARD §6
 pub const MAX_TX_BYTES: usize = 64 * 1024;
@@ -213,7 +213,18 @@ impl Reassembler {
         raw_chunk: &[u8],
         now_ms: u64,
     ) -> Result<Option<ReassembleEvent>, PeError> {
-        let chunk = PeChunk::decode(raw_chunk)?;
+        let chunk = PeChunkRef::decode(raw_chunk)?;
+        self.feed_chunk(peer, &chunk, now_ms)
+    }
+
+    /// Feed an already-decoded chunk (zero-copy hot path — the controller
+    /// decodes once and hands the view straight in). // ARD §3
+    pub fn feed_chunk(
+        &mut self,
+        peer: Muid,
+        chunk: &PeChunkRef<'_>,
+        now_ms: u64,
+    ) -> Result<Option<ReassembleEvent>, PeError> {
         let peer_idx = self.bind_peer(peer)?;
         let slot_idx = self.find_or_alloc_slot(peer_idx, chunk.request_id, now_ms)?;
 
@@ -228,11 +239,11 @@ impl Reassembler {
             if chunk.header.len() > slot.header.capacity() {
                 return Err(PeError::HeaderTooLarge);
             }
-            if slot.header_set && slot.header.as_slice() != chunk.header.as_slice() {
+            if slot.header_set && slot.header.as_slice() != chunk.header {
                 return Err(PeError::InconsistentChunking);
             }
             slot.header.clear();
-            slot.header.extend_from_slice(&chunk.header);
+            slot.header.extend_from_slice(chunk.header);
             slot.header_set = true;
         } else if !chunk.header.is_empty() {
             return Err(PeError::InconsistentChunking);
@@ -271,7 +282,7 @@ impl Reassembler {
         }
 
         let offset = slot.arena.len() as u32;
-        slot.arena.extend_from_slice(&chunk.property);
+        slot.arena.extend_from_slice(chunk.property);
         slot.index.push(FragmentMeta {
             chunk_num: chunk.chunk_num,
             offset,

@@ -18,9 +18,10 @@
 //! let mut prod = unsafe { Producer::new(&ring) };
 //! let mut cons = unsafe { Consumer::new(&ring) };
 //!
-//! assert!(prod.push(b"hello")); // whole slot is written, zero-padded
+//! assert!(prod.push(b"hello")); // per-slot length tracks the payload
 //! let slot = cons.peek().unwrap();
-//! assert_eq!(&slot[..5], b"hello");
+//! assert_eq!(slot.len(), 5);
+//! assert_eq!(slot, b"hello");
 //! cons.commit(); // publish as consumed — only now may the producer reuse it
 //! assert!(cons.peek().is_none());
 //! ```
@@ -50,10 +51,11 @@
 //!
 //! ## Implementation
 //!
-//! The ring uses a flat byte buffer of `N * B` bytes behind a single
-//! [`core::cell::UnsafeCell`]. Producers and consumers compute slot
-//! offsets from their respective indices. This avoids nested
-//! `MaybeUninit` arrays and keeps the memory model simple for miri.
+//! The ring uses a flat byte buffer of `N * B` bytes plus a per-slot
+//! `u32` length array, each behind a [`core::cell::UnsafeCell`]. Producers
+//! and consumers compute slot offsets from their respective indices. This
+//! avoids nested `MaybeUninit` arrays and keeps the memory model simple for
+//! miri.
 
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
@@ -70,6 +72,11 @@ pub struct Ring<const N: usize, const B: usize> {
     /// `[u8; N * B]` needs nightly `generic_const_exprs`; `[[u8; B]; N]`
     /// is layout-identical and stable.
     buf: UnsafeCell<MaybeUninit<[[u8; B]; N]>>,
+    /// Per-slot payload length in bytes (`0..=B`). The producer writes it
+    /// before publishing the slot; the consumer reads it after. This makes
+    /// the length explicit — payloads may legitimately contain (or end with)
+    /// `0x00` bytes, so "last non-zero byte" is NOT the length convention.
+    lens: UnsafeCell<MaybeUninit<[u32; N]>>,
     /// Next write slot index (producer advances).
     write_idx: AtomicUsize,
     /// Next read slot index (consumer advances).
@@ -91,6 +98,7 @@ impl<const N: usize, const B: usize> Ring<N, B> {
     pub fn new() -> Self {
         Self {
             buf: UnsafeCell::new(MaybeUninit::uninit()),
+            lens: UnsafeCell::new(MaybeUninit::uninit()),
             write_idx: AtomicUsize::new(0),
             read_idx: AtomicUsize::new(0),
             drops: AtomicUsize::new(0),
@@ -163,12 +171,12 @@ impl<'a, const N: usize, const B: usize> Producer<'a, N, B> {
     }
 
     /// Try to push `data` into the ring. Returns `true` on success,
-    /// `false` if the ring is full (data dropped, drop counter
-    /// incremented).
+    /// `false` if the ring is full or `data` exceeds the slot size
+    /// (data dropped, drop counter incremented).
     ///
-    /// The entire `B`-byte slot is written, with trailing bytes zeroed
-    /// if `data.len() < B`. The consumer reads the full slot and
-    /// interprets length from the SysEx framing.
+    /// The payload is copied into the slot and its length recorded
+    /// per-slot; `Consumer::peek` returns exactly the pushed bytes, so
+    /// payloads may legitimately end in `0x00`.
     #[inline]
     pub fn push(&mut self, data: &[u8]) -> bool {
         if data.len() > B {
@@ -189,18 +197,20 @@ impl<'a, const N: usize, const B: usize> Producer<'a, N, B> {
             }
         }
 
-        // Compute slot offset.
-        let offset = (self.cached_write % N) * B;
+        let slot = self.cached_write % N;
+        let offset = slot * B;
         let buf_ptr = self.ring.buf.get() as *mut u8;
+        let len_ptr = self.ring.lens.get() as *mut u32;
         // SAFETY: producer has exclusive write access to this slot;
-        // consumer won't read until write_idx advances.
+        // consumer won't read it until write_idx advances (published
+        // below with Release). The length is written before publish, so
+        // any consumer that observes the new write_idx (Acquire) also
+        // observes the length.
         unsafe {
             let dst = buf_ptr.add(offset);
             let len = data.len();
             core::ptr::copy_nonoverlapping(data.as_ptr(), dst, len);
-            if len < B {
-                core::ptr::write_bytes(dst.add(len), 0, B - len);
-            }
+            core::ptr::write(len_ptr.add(slot), len as u32);
         }
 
         // Publish.
@@ -251,8 +261,9 @@ impl<'a, const N: usize, const B: usize> Consumer<'a, N, B> {
     }
 
     /// Look at the next slot without consuming it. Returns `Some(&[u8])` on
-    /// success (the slice length is always `B`; the caller uses framing to
-    /// determine the actual payload length). Returns `None` if empty.
+    /// success — a slice of exactly the pushed payload length (the producer
+    /// records it per slot; trailing `0x00` bytes are preserved). Returns
+    /// `None` if empty.
     ///
     /// The returned slice stays valid until [`Self::commit`]: the slot is
     /// published as consumed only by `commit`, so the producer can never
@@ -267,12 +278,15 @@ impl<'a, const N: usize, const B: usize> Consumer<'a, N, B> {
             }
         }
 
-        let offset = (self.cached_read % N) * B;
+        let slot = self.cached_read % N;
         let buf_ptr = self.ring.buf.get() as *const u8;
+        let len_ptr = self.ring.lens.get() as *const u32;
         // SAFETY: the producer cannot write this slot while read_idx still
-        // points at it (a full ring has N pending; this slot is not yet
-        // committed, so it still counts as pending).
-        let data: &[u8] = unsafe { core::slice::from_raw_parts(buf_ptr.add(offset), B) };
+        // points at it (it still counts as pending until commit). The length
+        // was written before the producer published write_idx (Release) and
+        // we refreshed cached_write with an Acquire load, so it is visible.
+        let len = unsafe { (*len_ptr.add(slot)) as usize }.min(B);
+        let data: &[u8] = unsafe { core::slice::from_raw_parts(buf_ptr.add(slot * B), len) };
         Some(data)
     }
 
@@ -287,17 +301,16 @@ impl<'a, const N: usize, const B: usize> Consumer<'a, N, B> {
             .store(self.cached_read, Ordering::Release);
     }
 
-    /// Convenience: peek + copy to `out` + commit. Returns `true` on success.
+    /// Convenience: peek + copy to `out` + commit. Copies `min(payload,
+    /// out.len())` bytes (longer payloads are truncated) and returns the
+    /// number of bytes copied, or `None` if the ring is empty.
     #[inline]
-    pub fn pop_into(&mut self, out: &mut [u8; B]) -> bool {
-        match self.peek() {
-            None => false,
-            Some(data) => {
-                out.copy_from_slice(data);
-                self.commit();
-                true
-            }
-        }
+    pub fn pop_into(&mut self, out: &mut [u8]) -> Option<usize> {
+        let data = self.peek()?;
+        let n = data.len().min(out.len());
+        out[..n].copy_from_slice(&data[..n]);
+        self.commit();
+        Some(n)
     }
 
     /// Number of pending slots from the consumer's cached view.
@@ -334,11 +347,40 @@ mod tests {
         assert_eq!(prod.pending(), 1);
 
         let popped = cons.peek().unwrap();
-        assert_eq!(&popped[..16], &data[..]);
-        // Trailing bytes zeroed.
-        assert!(popped[16..].iter().all(|&b| b == 0));
+        // Exactly the pushed bytes — no padding convention.
+        assert_eq!(popped.len(), 16);
+        assert_eq!(popped, &data[..]);
         cons.commit();
         assert!(cons.peek().is_none());
+    }
+
+    #[test]
+    fn trailing_zero_bytes_are_preserved() {
+        // Payloads may legitimately end in 0x00 (e.g. v2 Discovery with
+        // output_path_id 0); the per-slot length — not "last non-zero byte" —
+        // defines the payload.
+        let ring = Ring::<4, 64>::new();
+        let mut prod = unsafe { Producer::new(&ring) };
+        let mut cons = unsafe { Consumer::new(&ring) };
+
+        let data = [0xAA, 0x00, 0x00];
+        assert!(prod.push(&data));
+        let popped = cons.peek().unwrap();
+        assert_eq!(popped, &data[..]);
+        cons.commit();
+    }
+
+    #[test]
+    fn pop_into_reports_copied_bytes() {
+        let ring = Ring::<4, 64>::new();
+        let mut prod = unsafe { Producer::new(&ring) };
+        let mut cons = unsafe { Consumer::new(&ring) };
+
+        assert_eq!(cons.pop_into(&mut [0u8; 8]), None); // empty
+        assert!(prod.push(b"abcd"));
+        let mut out = [0xFFu8; 2]; // smaller than the payload → truncation
+        assert_eq!(cons.pop_into(&mut out), Some(2));
+        assert_eq!(out, [b'a', b'b']);
     }
 
     #[test]
