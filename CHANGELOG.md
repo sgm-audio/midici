@@ -54,7 +54,7 @@ per ARD-001.
 - Initial workspace scaffold per ARD-001
 - Cargo workspace with 6 crates + 2 examples
 - CI workflow (fmt, clippy, test, doc, cargo-deny)
-- `docs/specs/` with M2-101, M2-103, M2-104 PDFs
+- Spec PDFs referenced during development live locally in `internal/specs/` (gitignored — MIDI Association copyright)
 - Phase 0: Bootstrap environment (Fedora 42 `midici-dev` container)
 - Phase 1: Management framing (Discovery, Reply, Endpoint, ACK, NAK, Invalidate MUID)
 - Phase 1: Management goldens (constructed, listed in VERIFY.md for human review)

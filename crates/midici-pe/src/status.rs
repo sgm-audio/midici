@@ -9,7 +9,7 @@ pub enum PeStatus {
     /// 201 Accepted – Set accepted but results not guaranteed. // M2-103 §7.4.1
     ///
     /// (ARD §4 lists 202 for Set; M2-103 v1.2 Table 15 defines 201 and no 202 —
-    /// the pinned spec wins. See PROGRESS.md Phase 7.)
+    /// the pinned spec wins. See internal/PROGRESS.md Phase 7.)
     Accepted = 201,
     /// 341 Resource Currently Unavailable or an Error Occurred. // M2-103 §7.4.1
     ///
@@ -30,7 +30,7 @@ pub enum PeStatus {
     /// ARD §7 maps excess concurrent txs → **445**. M2-103 §7.4.1 Table 15 lists
     /// **343** as “Too Many Requests” and **445** as “Invalid Version of Data”;
     /// this crate follows ARD §7 / Phase-4 DoD for the busy path and documents the
-    /// table discrepancy in `docs/PROGRESS.md`.
+    /// table discrepancy in `internal/PROGRESS.md`.
     Busy = 445,
 }
 

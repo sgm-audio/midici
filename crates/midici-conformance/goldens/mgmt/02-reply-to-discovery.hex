@@ -1,4 +1,4 @@
-# CONSTRUCTED vector — needs human check (see docs/VERIFY.md)
+# CONSTRUCTED vector — needs human check (see internal/VERIFY.md)
 # M2-101-UM v1.2.1 §5.6 Table 8 (PDF p.29) — Reply to Discovery, Message Format Version 0x02
 7E # Universal Non-Realtime SysEx — M2-101 §5.2.1 Table 5
 7F # Device ID from Function Block — M2-101 §5.6 Table 8
