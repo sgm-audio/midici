@@ -1325,3 +1325,11 @@ toolchain and append their verbatim outputs before merge.
 ### Next
 Run and record the DoD gates on a Rust-enabled machine; human-gate approvals
 are recorded above.
+
+## Session 4 — PR merge request — 2026-10-07
+
+- Scott explicitly directed that PR #16 be merged while the local DoD gates
+  remain blocked by the sandbox's missing Rust toolchain and the CI jobs have
+  no assigned runners. This records the direction; it does not claim those
+  gates passed. The branch is being reconciled with the updated `main` before
+  attempting the GitHub merge.

@@ -1,4 +1,4 @@
-# CONSTRUCTED vector — needs human check (see docs/VERIFY.md)
+# CONSTRUCTED vector — needs human check (see internal/VERIFY.md)
 # M2-101-UM v1.2.1 §5.5 Table 6 (PDF p.27) — Discovery, Message Format Version 0x02
 # Body is F0/F7 stripped (ARD §3 / M2-101 §5.2)
 7E # Universal Non-Realtime SysEx — M2-101 §5.2.1 Table 5

@@ -1,16 +1,16 @@
 # AGENTS.md — midici build rules (binding for all agent sessions)
 
 ## Session protocol
-1. START: read this file, docs/ARD-001.md, docs/PROGRESS.md. Work ONLY the current phase.
-2. END: append to docs/PROGRESS.md: phase, what was done, deviations from ARD (with reason),
+1. START: read this file, docs/ARD-001.md, internal/PROGRESS.md. Work ONLY the current phase.
+2. END: append to internal/PROGRESS.md: phase, what was done, deviations from ARD (with reason),
    DoD command outputs (verbatim), open items, next phase. This file is the single state object.
-3. On any tool/test failure: compact the failure to <10 lines in PROGRESS.md (root cause, not logs).
+3. On any tool/test failure: compact the failure to <10 lines in internal/PROGRESS.md (root cause, not logs).
 4. Never start the next phase in the same session.
 
 ## Source of truth — anti-fabrication (HIGHEST PRIORITY)
-5. Protocol facts come ONLY from docs/specs/* and docs/ARD-001.md. If a required byte layout,
+5. Protocol facts come ONLY from internal/specs/* and docs/ARD-001.md. If a required byte layout,
    constant, status code, or field is not derivable from those, STOP the phase and report the
-   exact gap in PROGRESS.md. NEVER guess protocol bytes. NEVER fill gaps from training memory.
+   exact gap in internal/PROGRESS.md. NEVER guess protocol bytes. NEVER fill gaps from training memory.
 6. Every spec constant carries a doc reference comment: // M2-101 §<section>.
 7. crates/midici-conformance/goldens/ is APPEND-ONLY. Modifying or deleting a golden requires
    the commit message line "HUMAN-APPROVED-GOLDEN-CHANGE: <reason>" authored by Scott.
@@ -20,41 +20,20 @@
 ## Engineering rules
 9. RT contract = ARD §6, verbatim. Any allocation, lock, syscall, or logging on the RT path is a
    defect, not a style issue.
-10. Dependency policy = ARD §2. Any new dependency requires a justification entry in PROGRESS.md.
+10. Dependency policy = ARD §2. Any new dependency requires a justification entry in internal/PROGRESS.md.
 11. No stubs, no todo!(), no placeholder implementations in committed code. Scope not yet built
     simply does not exist in the API surface.
 12. Conventional Commits (feat/fix/chore/docs/test/refactor). PR-sized branches; merge to main
     only with CI green.
-13. All commands run inside distrobox `midici-dev`. Never modify the host OS.
+13. Current build host is Scott's Windows machine, per `internal/ENVIRONMENT.md`.
+    `internal/ENVIRONMENT.md` is authoritative for which environment a given phase ran in.
 14. rustfmt + clippy -D warnings are gates, not suggestions.
 
 ## Definition-of-done protocol
 15. A phase's DoD is a list of shell commands. Done = all exit 0 AND outputs pasted in
- PROGRESS.md. Screenshots of green CI are not a substitute for local command output.
+ internal/PROGRESS.md. Screenshots of green CI are not a substitute for local command output.
 
-## Cursor Cloud specific instructions
-- Environment: the Cursor Cloud VM is **Ubuntu 24.04**, not the Fedora `distrobox midici-dev`
-  described in rule 13. That distrobox does **not** exist here — run `cargo`/`rustfmt`/`clippy`
-  directly on the host. The pinned toolchain (`rust-toolchain.toml` → stable `1.97.1`, with
-  `rustfmt`+`clippy`) is managed by `rustup` and auto-installs on the first `cargo` call.
-- System deps: `libasound2-dev` + `alsa-utils` + `pkg-config` are pre-installed for the planned
-  ALSA transport (ARD §2/§9). No committed crate links ALSA yet, so builds do not require them today.
-- Cargo dependencies download from crates.io at build time; the startup update script runs
-  `cargo fetch` to pre-warm them. No other refresh step is needed.
-- **Fixed in Phase 7:** the `crates/midici-transport-clap` breakage above is resolved —
-  `ring.rs` uses `[[u8; B]; N]` (stable), the `wrap_around` test logic bug is fixed, and a
-  genuine SPSC race (pop exposing an already-published slot) is fixed via
-  `Consumer::peek()`/`Consumer::commit()`. Whole-workspace commands and miri now pass.
-- WSL environment used in Phase 7 (this host had no `distrobox`/Cursor-Cloud VM): WSL
-  Ubuntu (`wsl -d Ubuntu`), rustup stable 1.97.1 auto-pinned, vendored `libasound2t64`
-  extracted to `~/alsa` + minimal `~/bin/pkg-config` shim (no root); cargo runs use
-  `RUSTFLAGS="-L /home/scott/alsa/usr/lib/x86_64-linux-gnu -C link-args=-Wl,-rpath,…"`.
-- To build/test the crates that compile on the current host (the real protocol surface), scope commands, e.g.:
-  `cargo test -p midici-core -p midici-pe -p midici-conformance -p midici-responder -p midici-transport-clap`
-  and `cargo clippy` / `cargo run` on the same set. `midici-transport-alsa` is Linux-only
-  (requires `libasound2-dev` + `pkg-config`); on Windows, skip the `-p midici-transport-alsa` argument.
-  `examples/virtual-responder` is the full standalone daemon (control loop over a virtual ALSA UMP
-  endpoint); `examples/clap-autoprop` ships the tested control-thread `flush_param_change` wiring,
-  but its `main` stays a stub until the CLAP host binding lands (Phase 6).
-- Optional extras: `midici-pe` has a `zlib` feature (`--all-features`); the `crates/midici-pe/fuzz`
-  targets need `cargo +nightly` + `cargo-fuzz` (not installed by default).
+## Environment
+AGENTS.md is binding on every agent/session, but the *host environment varies*.
+Current build host and per-phase environment history live in
+`internal/ENVIRONMENT.md` (not public-facing, but tracked with the repo).

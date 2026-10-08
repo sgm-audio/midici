@@ -1,4 +1,4 @@
-# CONSTRUCTED vector — needs human check (see docs/VERIFY.md)
+# CONSTRUCTED vector — needs human check (see internal/VERIFY.md)
 # M2-101-UM v1.2.1 §5.8 Table 11 (PDF p.31) — Reply to Endpoint Information
 # Information Data = ASCII "ABC" (ordinals 65-67 within 32-126) — M2-101 §5.8.3.1
 7E # Universal Non-Realtime SysEx — M2-101 §5.2.1 Table 5

@@ -15,3 +15,5 @@
 *.profdata
 *.src.rpm
 .token-optimizer/
+internal/specs/
+docs/specs/

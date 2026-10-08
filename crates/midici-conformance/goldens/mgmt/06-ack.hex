@@ -1,4 +1,4 @@
-# CONSTRUCTED vector — needs human check (see docs/VERIFY.md)
+# CONSTRUCTED vector — needs human check (see internal/VERIFY.md)
 # M2-101-UM v1.2.1 §5.10 Table 13–14 (PDF p.33–34) — MIDI-CI ACK
 7E # Universal Non-Realtime SysEx — M2-101 §5.2.1 Table 5
 7F # Device ID Function Block — M2-101 §5.10 Table 13
