@@ -26,7 +26,7 @@
 Protocol state machines with zero I/O, à la `quinn-proto`. Transports are thin adapters.
 - Deterministic: same input → same output given same RNG seed + monotonic time
 - Testable: in-memory loopback, golden transcript replay, property tests
-- Portable: `no_std` + alloc capable (embedded angle), no async runtime
+- Portable: `no_std` + `alloc` (core and pe build for `thumbv7em-none-eabihf`; not run on hardware), no async runtime
 
 ### Ownership
 
