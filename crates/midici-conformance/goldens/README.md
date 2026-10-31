@@ -1,10 +1,14 @@
-# HUMAN GATE G1 still open for Phase 1 mgmt goldens.
+# Goldens
+
+The Phase 1 management goldens (`mgmt/`) are constructed vectors: the spec has
+no worked byte examples for these messages. See `docs/VERIFY.md` for how each
+one was derived and its review status.
 
 Append-only. Modifying or deleting a golden requires a commit message line:
 
 `HUMAN-APPROVED-GOLDEN-CHANGE: <reason>`
 
-authored by Scott (`AGENTS.md` rule 7).
+approved by a maintainer (see `CONTRIBUTING.md`).
 
 ## Exchange transcripts (`goldens/exchanges/`)
 

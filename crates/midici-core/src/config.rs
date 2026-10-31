@@ -88,6 +88,8 @@ impl PeerState {
         self.supports_v1_2_messages()
     }
 
+    // One argument per Discovery field (M2-101 §5.5 Table 6).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_discovery(
         muid: Muid,
         info: DeviceIdentity,
