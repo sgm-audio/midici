@@ -108,10 +108,10 @@ per ARD-001.
 - Initial workspace scaffold per ARD-001
 - Cargo workspace with 6 crates + 2 examples
 - CI workflow (fmt, clippy, test, doc, cargo-deny)
-- Spec PDFs referenced during development live locally in `internal/specs/` (gitignored — MIDI Association copyright)
+- Spec PDFs referenced during development are not redistributed (MIDI Association copyright)
 - Phase 0: Bootstrap environment (Fedora 42 `midici-dev` container)
 - Phase 1: Management framing (Discovery, Reply, Endpoint, ACK, NAK, Invalidate MUID)
-- Phase 1: Management goldens (constructed, listed in VERIFY.md for human review)
+- Phase 1: Management goldens (constructed, listed in docs/VERIFY.md for review)
 - Phase 2: PE encodings + chunking (Mcoded7, zlib+Mcoded7, chunker, reassembler)
 - Phase 2: Fuzz targets (`fuzz_mcoded7`, `fuzz_reassemble`) — 10⁶ execs clean
 - Phase 3: `CiEngine` sans-io (feed_sysex, poll, next_outbound, next_event)
