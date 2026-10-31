@@ -23,9 +23,7 @@ use crate::json_header::{
     parse_subscription_header, GetInquiryHeader, SetInquiryHeader, SubCommand,
     NOTIFY_STATUS_TERMINATE,
 };
-use crate::reassembler::{
-    ReassembleEvent, Reassembler, MAX_CONCURRENT_PER_PEER, MAX_TX_BYTES,
-};
+use crate::reassembler::{ReassembleEvent, Reassembler, MAX_CONCURRENT_PER_PEER, MAX_TX_BYTES};
 use crate::registry::ResourceRegistry;
 use crate::resource::PeQuery;
 use crate::status::PeStatus;
@@ -498,9 +496,8 @@ impl PeController {
             Ok(h) => h,
             Err(st) => return self.reply(ctx, st, None, &[]),
         };
-        let reply = |me: &mut Self, status: PeStatus, sub: Option<SubId>| {
-            me.reply(ctx, status, sub, &[])
-        };
+        let reply =
+            |me: &mut Self, status: PeStatus, sub: Option<SubId>| me.reply(ctx, status, sub, &[]);
         match header.command {
             Some(SubCommand::Start) => {
                 let resource = match header.resource.as_deref() {
@@ -597,8 +594,8 @@ impl PeController {
             _ => encode_reply_header(status, None),
         }
         .map_err(|_| CiError::BadField)?;
-        let chunks =
-            split(ctx.request_id, &header, property, ctx.max_sysex).map_err(|_| CiError::BadField)?;
+        let chunks = split(ctx.request_id, &header, property, ctx.max_sysex)
+            .map_err(|_| CiError::BadField)?;
         for pe_payload in chunks {
             self.queue_pe(
                 ctx.group,
@@ -634,21 +631,23 @@ impl PeController {
         }
         header.encode(&mut self.encode_buf)?;
         self.encode_buf[midici_core::spec::CI_HEADER_LEN..need].copy_from_slice(pe_payload);
-        self.push_out(group, &self.encode_buf[..need]);
+        Self::push_out(&mut self.outbound, group, &self.encode_buf[..need]);
         Ok(())
     }
 
     fn queue_msg(&mut self, group: u8, msg: &PeCapabilities) -> Result<(), CiError> {
         let n = msg.encode(&mut self.encode_buf)?;
-        self.push_out(group, &self.encode_buf[..n]);
+        Self::push_out(&mut self.outbound, group, &self.encode_buf[..n]);
         Ok(())
     }
 
-    fn push_out(&mut self, group: u8, body: &[u8]) {
-        if self.outbound.len() >= OUT_CAP {
-            let _ = self.outbound.pop_front();
+    /// Takes the queue (not `&mut self`) so callers can pass a slice of
+    /// `self.encode_buf` without a conflicting borrow.
+    fn push_out(outbound: &mut VecDeque<OutboundSysex>, group: u8, body: &[u8]) {
+        if outbound.len() >= OUT_CAP {
+            let _ = outbound.pop_front();
         }
-        self.outbound.push_back(OutboundSysex {
+        outbound.push_back(OutboundSysex {
             group,
             body: body.to_vec(),
         });
