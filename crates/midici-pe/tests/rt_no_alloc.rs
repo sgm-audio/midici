@@ -25,7 +25,7 @@ use midici_core::spec::{CAP_PROPERTY_EXCHANGE, SUB_ID2_PE_SET_REPLY};
 use midici_core::{
     mgmt_header, pe_caps_inquiry, CiConfig, CiHeader, Discovery, Muid, PeGetMessage,
 };
-use midici_pe::{encode_set_inquiry_header, split, ResponderEngine, ResourceRegistry};
+use midici_pe::{encode_set_inquiry_header, split, ResourceRegistry, ResponderEngine};
 
 /// Deterministic, allocation-free RNG for the engine's nonce paths.
 struct Seeded(u32);
@@ -153,11 +153,7 @@ fn inbound_partial_feed_is_alloc_free_and_completion_is_net_zero() {
     registry.register(Box::new(Writable {
         expect_len: prop.len(),
     }));
-    let mut eng = ResponderEngine::new(
-        CiConfig::responder_default(identity),
-        Seeded(7),
-        registry,
-    );
+    let mut eng = ResponderEngine::new(CiConfig::responder_default(identity), Seeded(7), registry);
     let peer = Muid::ordinary(0x0102_0304).unwrap();
 
     // Discovery + PE Caps: establish the peer (CI table row + PE caps row,
