@@ -1,25 +1,83 @@
 # midici
 
-Rust MIDI-CI / Property Exchange responder stack.
+A Rust implementation of the MIDI 2.0 **MIDI Capability Inquiry (MIDI-CI)** and
+**Property Exchange (PE)** responder stack.
 
-**Why MIDI 2.0 Matters Now**: MIDI 1.3 launched in 2020; four years later, zero open-source control-plane tooling exists. Every DAW, plugin, and hardware synth now speaks MIDI 2.0 natively, but the missing piece is the *property exchange layer* that lets software discover, negotiate, and configure capabilities at runtime. midici fills that gap — the only Rust-based PE responder stack that doesn't drag a C++/Python bridge. Zero-cost abstraction + compile-time capability negotiation.
+MIDI-CI is the part of MIDI 2.0 that lets two devices discover each other and
+negotiate what they support; Property Exchange lets one query and set a
+device's properties (device info, resource lists, controller lists) as JSON
+over SysEx. midici implements the responder side as sans-io state machines,
+so it can sit behind any transport: an ALSA UMP endpoint, a CLAP plugin, or a
+test harness.
 
-**Getting Started**:
-1. Clone the repo: `git clone https://github.com/sgm-audio/midici.git`
-2. Ensure Rust toolchain 1.97.1 (pinned in `rust-toolchain.toml`; auto-installed by `rustup` on first `cargo` call)
-3. Build the core crate: `cargo build -p midici-core`
-4. Run the protocol test suites: `cargo test -p midici-core -p midici-pe -p midici-conformance`
-5. Run the virtual responder daemon on a virtual ALSA UMP endpoint: `cargo run -p virtual-responder`
-6. See `docs/guide/` for integration walkthroughs.
+- Sans-io core: no threads, sockets or allocation on the real-time path
+  (see `docs/guide/rt-contract.md`).
+- Discovery, MUID lifecycle and collision handling, ACK/NAK, Endpoint Inquiry.
+- PE Capabilities, Get, Set, Subscribe and Notify, with chunking, Mcoded7 and
+  optional zlib.
+- Regression harness (`midici-conformance`): byte-exact golden transcripts,
+  proptests and 4 fuzz targets. The goldens are produced by midici from the
+  spec tables, not captured from third-party devices, so they catch
+  regressions but don't prove interop.
+- `midici-core` and `midici-pe` are `no_std` + `alloc`. They build for
+  `thumbv7em-none-eabihf` (checked 2026-10-31); nothing has run on embedded
+  hardware.
+- Message-by-message status: `docs/guide/spec-coverage.md`.
 
-**API Reference** (layered per `docs/ARD-001.md` §3):
-- `midici-core` — sans-io MIDI-CI state machines: `CiEngine` (Discovery, MUID lifecycle, ACK/NAK), `CiConfig`, `CiEvent`, `Muid`
-- `midici-pe` — Property Exchange: `ResponderEngine` (combined CI + PE façade), `ResourceRegistry` + the `PropertyResource` trait (`DeviceInfo`, `ResourceList` provided), `SubscriptionTable`, chunker / Mcoded7 / JSON codecs
-- `midici-responder` — ergonomic façade re-exporting the PE engine for hosts
-- `midici-transport-alsa` / `midici-transport-clap` — transport adapters (ALSA UMP sequencer; CLAP RT-safe byte rings, `Ring<N, B>`)
+## Getting started
 
-See `AGENTS.md` for the binding build rules and `docs/ARD-001.md` for the full architecture.
+Requires the Rust toolchain pinned in `rust-toolchain.toml` (installed
+automatically by `rustup`). The ALSA transport and the `virtual-responder`
+example are Linux-only and need `libasound2-dev` (ALSA ≥ 1.2.13) and
+`pkg-config`.
+
+```sh
+git clone https://github.com/sgm-audio/midici.git
+cd midici
+
+# Build and test the portable crates (any OS)
+cargo test -p midici-core -p midici-pe -p midici-conformance -p midici-responder -p midici-transport-clap
+
+# Linux: run a MIDI-CI responder on a virtual ALSA UMP endpoint
+cargo run -p virtual-responder -- --help
+cargo run -p virtual-responder
+```
+
+Integration walkthroughs are in `docs/guide/`.
+
+## Crates
+
+Layered per `docs/ARD-001.md` §3:
+
+- `midici-core` — sans-io MIDI-CI state machines: `CiEngine` (Discovery, MUID
+  lifecycle, ACK/NAK), `CiConfig`, `CiEvent`, `Muid`.
+- `midici-pe` — Property Exchange: `ResponderEngine` (combined CI + PE
+  façade), `ResourceRegistry` and the `PropertyResource` trait (`DeviceInfo`,
+  `ResourceList` provided), `SubscriptionTable`, chunker / Mcoded7 / JSON
+  codecs.
+- `midici-responder` — ergonomic façade re-exporting the PE engine for hosts.
+- `midici-transport-alsa` / `midici-transport-clap` — transport adapters (ALSA
+  UMP sequencer; RT-safe byte rings for CLAP plugins, `Ring<N, B>`).
+- `midici-conformance` — golden transcripts, test initiator shim, fuzz targets.
+
+## Status
+
+Pre-1.0 (0.1.0 is on crates.io). On 2026-10-31, on Linux x86-64 with Rust
+1.97.1, `cargo test` over the workspace minus the two ALSA crates gave 108
+passed, 0 failed, 1 ignored (`dump_pe_get_golden`, a golden-regeneration
+helper); fmt, clippy `-D warnings` and rustdoc `-D warnings` were clean. The
+ALSA transport was not built there (no alsa-lib ≥ 1.2.13). GitHub Actions has
+not completed a run yet. MSRV is the pinned toolchain (1.97.1); older
+compilers aren't tested. Interop testing against third-party hosts and hardware is tracked in
+`docs/INTEROP.md`; the management goldens are constructed from the spec tables
+(the spec has no worked byte examples) and their derivation is recorded in
+`docs/VERIFY.md`.
+
+## Contributing
+
+See `CONTRIBUTING.md` for the project rules and the local checks that mirror CI.
+Architecture: `docs/ARD-001.md`.
 
 ## License
 
-MIT
+MIT — see `LICENSE`.
