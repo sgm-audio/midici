@@ -1,6 +1,6 @@
 //! State-machine model tests: (state, input) → (state', outputs).
 //!
-//! Citations for NAK vs silent-drop behavior are inline per `AGENTS.md` §5.
+//! Citations for NAK vs silent-drop behavior are inline, per the spec-citation rule in `CONTRIBUTING.md`.
 
 use midici_core::spec::{
     CI_HEADER_LEN, MESSAGE_FORMAT_VERSION_1_1, MESSAGE_FORMAT_VERSION_1_2,
