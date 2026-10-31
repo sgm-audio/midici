@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main, "cursor/**"]
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -21,6 +21,17 @@ jobs:
           toolchain: "1.97.1"
           components: rustfmt
       - run: cargo fmt --all -- --check
+
+  no-std:
+    name: no_std build (thumbv7em-none-eabihf)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+          targets: thumbv7em-none-eabihf
+      - run: cargo build -p midici-core -p midici-pe --no-default-features --target thumbv7em-none-eabihf
 
   clippy:
     name: clippy
