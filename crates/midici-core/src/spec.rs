@@ -1,6 +1,6 @@
 //! MIDI-CI Management constants from M2-101-UM.
 //!
-//! Every constant cites its specification section (`AGENTS.md` §6).
+//! Every constant cites its specification section (see `CONTRIBUTING.md`).
 
 /// Universal Non-Realtime System Exclusive ID. // M2-101 §5.2.1 Table 5
 pub const UNIVERSAL_NON_REALTIME: u8 = 0x7E;

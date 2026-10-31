@@ -302,6 +302,7 @@ impl<R: RngCore> CiEngine<R> {
 
     /// Upsert a discovered peer (stamping liveness) and emit
     /// [`CiEvent::PeerDiscovered`]. Shared by Discovery and Reply handling.
+    #[allow(clippy::too_many_arguments)]
     fn register_peer(
         &mut self,
         muid: Muid,
