@@ -1,7 +1,7 @@
 //! Conformance harness: golden transcripts, fuzz targets, and interop checks.
 //!
 //! See `docs/ARD-001.md` §8. Goldens under `goldens/` are append-only
-//! (`AGENTS.md` rule 7).
+//! (see `CONTRIBUTING.md`).
 
 use std::fs;
 use std::path::{Path, PathBuf};

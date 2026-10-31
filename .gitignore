@@ -17,3 +17,7 @@
 .token-optimizer/
 internal/specs/
 docs/specs/
+
+# Local agent / maintainer notes (kept out of the public tree)
+/internal/
+/AGENTS.md
