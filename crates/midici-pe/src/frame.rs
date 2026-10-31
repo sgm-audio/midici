@@ -13,11 +13,15 @@ pub const PE_FRAMING_LEN: usize = 1 + 2 + 2 + 2 + 2;
 /// Request ID is a 7-bit value `0..=127`. // M2-103 §5.3
 pub const REQUEST_ID_MAX: u8 = 0x7F;
 
+/// Borrowed PE framing fields:
+/// `(request_id, header, num_chunks, chunk_num, property)`.
+type ChunkFields<'a> = (u8, &'a [u8], u16, u16, &'a [u8]);
+
 /// Decode the fixed PE framing fields of a chunk without copying.
 /// Returns `(request_id, header, num_chunks, chunk_num, property)`
 /// borrowed from `data`. Shared by [`PeChunk::decode`] and
 /// [`PeChunkRef::decode`] so validation stays in one place.
-fn decode_fields(data: &[u8]) -> Result<(u8, &[u8], u16, u16, &[u8]), PeError> {
+fn decode_fields(data: &[u8]) -> Result<ChunkFields<'_>, PeError> {
     if data.len() < PE_FRAMING_LEN {
         return Err(PeError::Truncated);
     }
