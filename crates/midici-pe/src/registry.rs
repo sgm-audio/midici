@@ -67,7 +67,8 @@ impl ResourceRegistry {
         {
             self.resources[i] = Box::new(ResourceListResource::new(names));
         } else {
-            self.resources.push(Box::new(ResourceListResource::new(names)));
+            self.resources
+                .push(Box::new(ResourceListResource::new(names)));
         }
     }
 

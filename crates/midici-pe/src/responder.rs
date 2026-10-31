@@ -150,7 +150,9 @@ impl<R: RngCore> ResponderEngine<R> {
                     .unwrap_or(self.ci.config().max_sysex_size);
                 // PE traffic keeps the peer alive for liveness tracking. // ARD §7
                 self.ci.note_peer_activity(h.source);
-                return self.pe.feed(self.ci.muid(), peer_max, group, body, self.now_ms);
+                return self
+                    .pe
+                    .feed(self.ci.muid(), peer_max, group, body, self.now_ms);
             }
         }
         self.ci.feed_sysex(group, body)
