@@ -235,7 +235,11 @@ impl ReplyToDiscovery {
             category_supported: f.category_supported,
             max_sysex_size: f.max_sysex_size,
             output_path_id: f.output_path_id,
-            function_block: if v2 { data[17] } else { DEVICE_ID_FUNCTION_BLOCK },
+            function_block: if v2 {
+                data[17]
+            } else {
+                DEVICE_ID_FUNCTION_BLOCK
+            },
         })
     }
 
@@ -502,8 +506,7 @@ pub struct Ack<'a> {
 
 impl<'a> Ack<'a> {
     pub fn decode(body: &'a [u8]) -> Result<Self, CiError> {
-        decode_ack_nak(body, SUB_ID2_ACK)
-            .map(|(header, body)| Self { header, body })
+        decode_ack_nak(body, SUB_ID2_ACK).map(|(header, body)| Self { header, body })
     }
 
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, CiError> {
@@ -520,8 +523,7 @@ pub struct Nak<'a> {
 
 impl<'a> Nak<'a> {
     pub fn decode(body: &'a [u8]) -> Result<Self, CiError> {
-        decode_ack_nak(body, SUB_ID2_NAK)
-            .map(|(header, body)| Self { header, body })
+        decode_ack_nak(body, SUB_ID2_NAK).map(|(header, body)| Self { header, body })
     }
 
     pub fn encode(&self, out: &mut [u8]) -> Result<usize, CiError> {

@@ -25,7 +25,7 @@ goldens/
     └── 05-pe-set-subscribe.transcript
 ```
 
-**Rule:** Modifying/deleting a golden requires commit message `HUMAN-APPROVED-GOLDEN-CHANGE: <reason>` authored by Scott.
+**Rule:** Modifying/deleting a golden requires commit message `HUMAN-APPROVED-GOLDEN-CHANGE: <reason>` approved by a maintainer (see `CONTRIBUTING.md`).
 
 ## Transcript format
 

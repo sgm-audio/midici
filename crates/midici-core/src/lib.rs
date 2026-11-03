@@ -2,7 +2,7 @@
 //!
 //! Phase 3 exposes the ARD §3 `CiEngine` surface for Management flows.
 //! Phase 4 adds PE Capabilities / Get message codecs (`pe_caps`, `pe_get`).
-//! Protocol constants cite M2-101-UM sections (`AGENTS.md` §6).
+//! Protocol constants cite M2-101-UM sections (see `CONTRIBUTING.md`).
 //!
 //! Inbound contract matches ARD §3: feed complete SysEx7 bodies with F0/F7 stripped.
 //!

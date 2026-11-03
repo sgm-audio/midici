@@ -416,6 +416,7 @@ name = "midici-pe"
 version = "0.1.0"
 dependencies = [
  "midici-core",
+ "midici-test-alloc",
  "miniz_oxide",
  "proptest",
  "rand 0.8.7",
@@ -432,6 +433,10 @@ dependencies = [
  "midici-pe",
  "rand_core 0.6.4",
 ]
+
+[[package]]
+name = "midici-test-alloc"
+version = "0.1.0"
 
 [[package]]
 name = "midici-transport-alsa"

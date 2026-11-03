@@ -2,12 +2,12 @@
 
 Phases append verification entries (command, expected, observed, result).
 
-## Constructed vectors — needs human check
+## Constructed vectors — pending independent review
 
 M2-101-UM v1.2.1 contains **no worked byte-sequence examples** for Management messages
 (Discovery / Reply / Endpoint / Invalidate / ACK / NAK). The following goldens were
 constructed field-by-field from the cited tables; each `.hex` file includes per-byte
-section citations. Scott must diff-review against the PDFs (HUMAN GATE G1) before Phase 2.
+section citations. These have not yet been independently diff-reviewed against the spec PDFs.
 
 | Golden | Spec anchor | Notes |
 |---|---|---|
