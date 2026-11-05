@@ -11,7 +11,7 @@ use midici_pe::{ResourceRegistry, ResponderEngine};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-use crate::error::{Result, TransportError};
+use crate::error::Result;
 use crate::sysex7_ump::{encode_sysex7_packets, Sysex7Reassembler};
 use crate::ump_seq::{EndpointConfig, UmpSeqEndpoint};
 
@@ -64,7 +64,7 @@ pub fn run_responder_loop(mut opts: LoopOptions) -> Result<()> {
     engine.announce_discovery();
     flush_outbound(&ep, &mut engine, group)?;
 
-    let mut reasm = Sysex7Reassembler::with_max_body_bytes(cfg.max_sysex_size as usize);
+    let mut reasm = Sysex7Reassembler::new().with_max_body_bytes(cfg.max_sysex_size as usize);
     let start = Instant::now();
 
     while opts.running.load(Ordering::SeqCst) {
