@@ -15,8 +15,13 @@ test harness.
 - Discovery, MUID lifecycle and collision handling, ACK/NAK, Endpoint Inquiry.
 - PE Capabilities, Get, Set, Subscribe and Notify, with chunking, Mcoded7 and
   optional zlib.
-- Conformance harness with byte-exact golden transcripts, proptests and fuzz
-  targets.
+- Regression harness (`midici-conformance`): byte-exact golden transcripts,
+  proptests and 4 fuzz targets. The goldens are produced by midici from the
+  spec tables, not captured from third-party devices, so they catch
+  regressions but don't prove interop.
+- `midici-core` and `midici-pe` are `no_std` + `alloc`. They build for
+  `thumbv7em-none-eabihf` (checked 2026-10-31); nothing has run on embedded
+  hardware.
 - Message-by-message status: `docs/guide/spec-coverage.md`.
 
 ## Getting started
@@ -53,11 +58,17 @@ Layered per `docs/ARD-001.md` §3:
 - `midici-responder` — ergonomic façade re-exporting the PE engine for hosts.
 - `midici-transport-alsa` / `midici-transport-clap` — transport adapters (ALSA
   UMP sequencer; RT-safe byte rings for CLAP plugins, `Ring<N, B>`).
-- `midici-conformance` — golden transcripts and interop checks.
+- `midici-conformance` — golden transcripts, test initiator shim, fuzz targets.
 
 ## Status
 
-Pre-1.0. Interop testing against third-party hosts and hardware is tracked in
+Pre-1.0 (0.1.0 is on crates.io). On 2026-10-31, on Linux x86-64 with Rust
+1.97.1, `cargo test` over the workspace minus the two ALSA crates gave 108
+passed, 0 failed, 1 ignored (`dump_pe_get_golden`, a golden-regeneration
+helper); fmt, clippy `-D warnings` and rustdoc `-D warnings` were clean. The
+ALSA transport was not built there (no alsa-lib ≥ 1.2.13). GitHub Actions has
+not completed a run yet. MSRV is the pinned toolchain (1.97.1); older
+compilers aren't tested. Interop testing against third-party hosts and hardware is tracked in
 `docs/INTEROP.md`; the management goldens are constructed from the spec tables
 (the spec has no worked byte examples) and their derivation is recorded in
 `docs/VERIFY.md`.

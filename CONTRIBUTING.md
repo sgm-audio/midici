@@ -41,6 +41,9 @@ cargo doc --workspace --no-deps --all-features
 cargo deny check
 ```
 
+`scripts/ci.sh` runs fmt, clippy, test, doc and the `no_std` target build on
+the portable crates (add `WITH_ALSA=1` on Linux with alsa-lib ≥ 1.2.13).
+
 On non-Linux hosts, scope to the portable crates:
 
 ```sh

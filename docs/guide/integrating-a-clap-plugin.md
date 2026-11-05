@@ -3,7 +3,7 @@
 **Goal (ARD §5):** a CLAP plugin exposes `ChCtrlList` over Property Exchange so
 a CI-capable controller/host auto-maps its parameters. No MIDI-learn.
 
-> Status note (per AGENTS honesty rules): the **PE machinery is complete**
+> Status: the PE machinery is done
 > (Set, subscriptions, Notify fan-out, tested at the wire level) and
 > `examples/clap-autoprop` ships the control-thread entry point
 > `flush_param_change`. The CLAP plugin binary itself (entry point vtable,
@@ -98,6 +98,6 @@ If the update does not fit one chunk, prefer `notify` (M2-103 §11.1.1).
 - RT ring bridge (`midici-transport-clap` `Ring`) wired to CLAP MIDI events
 - Host timer (`clap_host_timer`, 10 ms) driving `engine.poll` + ring drain
 
-Once the binary lands, the demo (`docs/media/autoprop.cast`, G9a) records:
-build → load in a CLAP host → watch Discovery → Get ChCtrlList → Subscribe →
-updates on param changes.
+Not done yet: a recorded demo (build → load in a CLAP host → Discovery → Get
+ChCtrlList → Subscribe → updates on param changes). There is no plugin binary
+to record.
