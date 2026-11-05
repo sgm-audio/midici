@@ -51,6 +51,9 @@ pub fn run_responder_loop(mut opts: LoopOptions) -> Result<()> {
     let mut cfg = CiConfig::responder_default(opts.identity);
     cfg.max_sysex_size = opts.max_sysex.max(MIN_RECEIVABLE_SYSEX_SIZE);
     cfg.local_group = opts.endpoint.group;
+    // `cfg` moves into the engine; keep the advertised receivable max to cap
+    // inbound SysEx7 reassembly. // ARD §7
+    let max_inbound_sysex = cfg.max_sysex_size as usize;
     let registry = ResourceRegistry::with_device_info(opts.identity);
     let mut engine = ResponderEngine::new(cfg, StdRng::seed_from_u64(opts.seed), registry);
 
@@ -64,7 +67,7 @@ pub fn run_responder_loop(mut opts: LoopOptions) -> Result<()> {
     engine.announce_discovery();
     flush_outbound(&ep, &mut engine, group)?;
 
-    let mut reasm = Sysex7Reassembler::new().with_max_body_bytes(cfg.max_sysex_size as usize);
+    let mut reasm = Sysex7Reassembler::new().with_max_body_bytes(max_inbound_sysex);
     let start = Instant::now();
 
     while opts.running.load(Ordering::SeqCst) {
